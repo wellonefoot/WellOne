@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Wellone | Fancy & Footwear</title>
+  <link rel="preconnect" href="https://wnavzhrkwgnegjdetdno.supabase.co">
+  <link rel="preload" href="assets/logo.png?v=50" as="image">
+  <script>
+    (function(){
+      try{
+        if(window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone){
+          document.documentElement.classList.add('pwa-launching');
+        }
+      }catch(_error){}
+    })();
+  </script>
+  
+  <link rel="stylesheet" href="css/style.css?v=50">
+  <link rel="icon" href="./assets/favicon/favicon.ico" type="image/x-icon">
+  <link rel="apple-touch-icon" href="./assets/favicon/apple-icon-180x180.png">
+  <link rel="manifest" href="manifest.webmanifest">
+  <meta name="theme-color" content="#f5fff4">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Wellone">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+</head>
+<body class="home-page">
+  <div id="pwaLaunchSplash" class="app-launch-splash" aria-hidden="true">
+    <img src="assets/logo.png?v=50" alt="" width="3144" height="824" fetchpriority="high">
+  </div>
+  <header class="header site-header">
+    <div class="nav-wrap">
+      <a class="brand" href="index.html" aria-label="Wellone home"><img src="assets/logo.png?v=50" alt="Wellone logo" width="3144" height="824" decoding="async" fetchpriority="high"></a>
+      <nav class="nav" aria-label="Main navigation"><a href="index.html">Home</a><a href="about.html">About Us</a><a href="contact.html">Contact Us</a></nav>
+      <div class="header-actions">
+        <a class="header-icon header-search" href="catalog.html" aria-label="Search products">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.8"></circle><path d="m16.2 16.2 4.1 4.1"></path></svg>
+        </a>
+        <a class="header-icon header-cart" href="cart.html" aria-label="Open cart">
+          <svg viewBox="0 0 28 28" aria-hidden="true"><path d="M3.5 5.5h3l2.1 11.1a2.2 2.2 0 0 0 2.2 1.8h9.4a2.2 2.2 0 0 0 2.1-1.6l1.8-6.4H8"></path><circle cx="11.2" cy="22.5" r="1.6"></circle><circle cx="20.8" cy="22.5" r="1.6"></circle></svg>
+          <span class="header-cart-count" data-cart-count>0</span>
+        </a>
+        <button class="menu-toggle" type="button" aria-label="Open menu" aria-expanded="false"><span></span><span></span><span></span></button>
+      </div>
+    </div>
+  </header>
+  <main class="shop-home">
+    <section class="quick-shop compact-search-card pattern-card" aria-label="Search products">
+      <form id="homeSearchForm" class="search-bar compact-search" action="catalog.html">
+        <input id="homeSearchInput" name="q" type="search" placeholder="Search for products..." autocomplete="off">
+        <button class="search-icon-btn" type="submit" aria-label="Search">⌕</button>
+      </form>
+    </section>
+
+
+    <section id="offerSection" class="offer-section hidden" aria-label="Discount offers">
+      <div class="section-title-row compact"><div><p class="tag">today's deals</p><h1>Discount picks</h1></div><a class="mini-link" href="catalog.html">View all</a></div>
+      <div id="offerSlider" class="offer-slider"></div>
+    </section>
+
+    <section class="section categories-only">
+      <div id="homeCategories" class="category-grid skeleton-grid"></div>
+    </section>
+
+
+    <section class="service-strip" aria-label="Shopping benefits">
+      <article><span class="service-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 19 6v5c0 4.6-2.8 8-7 10-4.2-2-7-5.4-7-10V6l7-3Z"></path><path d="m8.7 12 2.1 2.1 4.7-5"></path></svg></span><span><b>Secure Shopping</b><small>Safe and simple orders</small></span></article>
+      <article><span class="service-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h11v10H3z"></path><path d="M14 10h4l3 3v3h-7z"></path><circle cx="7" cy="18" r="2"></circle><circle cx="18" cy="18" r="2"></circle></svg></span><span><b>Fast Delivery</b><small>Quick local dispatch</small></span></article>
+      <article><span class="service-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 2.1 2.2 3-.4.9 2.9 2.7 1.4-1.4 2.7 1.4 2.7-2.7 1.4-.9 2.9-3-.4L12 21l-2.1-2.2-3 .4-.9-2.9-2.7-1.4 1.4-2.7-1.4-2.7L6 7.7l.9-2.9 3 .4L12 3Z"></path><path d="m9.3 12 1.7 1.7 3.8-4"></path></svg></span><span><b>Best Quality</b><small>Carefully selected products</small></span></article>
+      <article><span class="service-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 13v-2a8 8 0 0 1 16 0v2"></path><path d="M4 13a2 2 0 0 1 2-2h1v6H6a2 2 0 0 1-2-2v-2Zm16 0a2 2 0 0 0-2-2h-1v6h1a2 2 0 0 0 2-2v-2Z"></path><path d="M17 18c-1 2-3 3-5 3"></path></svg></span><span><b>Customer Support</b><small>Friendly WhatsApp help</small></span></article>
+    </section>
+
+
+    <section class="install-app-section" aria-labelledby="installAppTitle">
+      <div class="install-app-copy">
+        <span class="install-app-symbol" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><rect x="6.5" y="2.5" width="11" height="19" rx="2.2"></rect><path d="M10 5h4M10.5 18.5h3"></path></svg>
+        </span>
+        <div class="install-app-text">
+          <p class="install-app-kicker">Wellone on your phone</p>
+          <h2 id="installAppTitle">Install our web app</h2>
+          <p>Add Wellone to your home screen for a faster, cleaner shopping experience.</p>
+        </div>
+        <button id="pwaInstallBtn" class="install-webapp-btn" type="button">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v11"></path><path d="m8 10 4 4 4-4"></path><path d="M5 18v2h14v-2"></path></svg>
+          <span>Install Wellone</span>
+        </button>
+        <p id="pwaInstallHint" class="install-app-hint">No app store needed — install directly from your browser.</p>
+        <div id="pwaInstallHelp" class="install-app-help hidden" role="status" aria-live="polite"></div>
+      </div>
+
+      <div class="install-phone-stage" aria-hidden="true">
+        <div class="install-phone install-phone-back">
+          <div class="install-phone-notch"></div>
+          <div class="install-phone-screen">
+            <img src="assets/logo.png?v=50" alt="">
+            <span class="phone-search-line"></span>
+            <div class="phone-promo phone-promo-small"><b>NEW</b><span>ARRIVALS</span></div>
+            <div class="phone-mini-grid"><i></i><i></i><i></i><i></i></div>
+          </div>
+        </div>
+        <div class="install-phone install-phone-front">
+          <div class="install-phone-notch"></div>
+          <div class="install-phone-screen">
+            <img src="assets/logo.png?v=50" alt="">
+            <span class="phone-search-line"></span>
+            <div class="phone-promo"><b>SALE</b><span>is live</span><em>Shop now</em></div>
+            <div class="phone-mini-grid"><i></i><i></i><i></i><i></i></div>
+          </div>
+        </div>
+      </div>
+    </section>
+</main>
+  <a class="floating-cart" href="cart.html" aria-label="Open cart">Cart <b id="floatCartCount">0</b></a>
+  <footer>© 2026 Wellone Fancy & Footwear. All rights reserved.</footer>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="js/config.js?v=50"></script>
+  <script src="js/cart.js?v=50"></script>
+  <script src="js/supabase-data.js?v=50"></script>
+  <script src="js/app.js?v=50"></script>
+  <script>initHome();</script>
+  <script src="js/pwa-install.js?v=50"></script>
+</body>
+</html>
