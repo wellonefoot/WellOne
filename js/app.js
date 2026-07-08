@@ -530,7 +530,7 @@ async function initProduct(){
   const instantProduct = getProductFromInstantCache(categoryName, productId);
   if(instantProduct && holder){
     activeProduct = instantProduct;
-    activeVariantIndex = 0;
+    activeVariantIndex = firstAvailableVariantIndex(instantProduct);
     activeSizeIndex = 0;
     activeImageIndex = 0;
     renderProductDetail();
@@ -544,7 +544,7 @@ async function initProduct(){
     return;
   }
   activeProduct = product;
-  activeVariantIndex = 0;
+  activeVariantIndex = firstAvailableVariantIndex(product);
   activeSizeIndex = 0;
   activeImageIndex = 0;
   renderProductDetail();
@@ -605,11 +605,27 @@ function termSymbol(term){
   if(label.includes('refund') || label.includes('non')) return '×';
   return cleanText(term.icon || '✓');
 }
-function productIsAvailable(product){
-  return !!product && cleanText(product.Status || 'active') === 'active' && cleanText(product.StockStatus || 'in_stock') !== 'out_of_stock';
+function variantIsAvailable(variant){
+  return !variant || cleanText(variant.stockStatus || variant.stock_status || 'in_stock') !== 'out_of_stock';
 }
-function productStockNote(product){
-  return productIsAvailable(product) ? '' : '<div class="stock-alert">Currently out of stock. Contact the shop to check availability.</div>';
+function firstAvailableVariantIndex(product){
+  const variants = Array.isArray(product && product.Variants) ? product.Variants : [];
+  const index = variants.findIndex(variantIsAvailable);
+  return index >= 0 ? index : 0;
+}
+function productIsAvailable(product, variant = null){
+  if(!product || cleanText(product.Status || 'active') !== 'active' || cleanText(product.StockStatus || 'in_stock') === 'out_of_stock') return false;
+  if(variant && !variantIsAvailable(variant)) return false;
+  const variants = Array.isArray(product.Variants) ? product.Variants : [];
+  return !variants.length || variants.some(variantIsAvailable);
+}
+function productStockNote(product, variant = null){
+  if(productIsAvailable(product, variant)) return '';
+  if(product && cleanText(product.StockStatus || 'in_stock') !== 'out_of_stock' && variant && !variantIsAvailable(variant)){
+    const label = cleanText(variant.color || variant.label || 'Selected option');
+    return `<div class="stock-alert">${escapeHtml(label)} is currently out of stock. Choose another available option.</div>`;
+  }
+  return '<div class="stock-alert">Currently out of stock. Contact the shop to check availability.</div>';
 }
 function productGalleryImages(product, variant){
   const list = [];
@@ -678,15 +694,15 @@ function renderProductDetail(){
       ${product.Description ? `<p class="muted detail-description">${escapeHtml(product.Description)}</p>` : ''}
       ${priceHtml(product, variant)}
       <div class="detail-option-card">
-        ${colorMode ? `<div class="option-block"><b>Choose colour</b><div class="color-variant-options">${product.Variants.map((v,i)=>`<button class="color-variant-choice ${i===activeVariantIndex?'active':''}" type="button" onclick="selectColorVariant(${i})" aria-pressed="${i===activeVariantIndex?'true':'false'}"><span>${escapeHtml(v.color || v.label || 'Colour')}</span></button>`).join('')}</div></div>` : ''}
-        ${hasVariants ? `<div class="option-block"><b>Choose ${escapeHtml(optionTitle)}</b><button id="variantPickerButton" class="select-option-button" type="button" onclick="openVariantSheet()"><span>${escapeHtml(selectedVariantText())}</span><i>Change</i></button></div>` : ''}
+        ${colorMode ? `<div class="option-block"><b>Choose colour</b><div class="color-variant-options">${product.Variants.map((v,i)=>{ const available = variantIsAvailable(v); return `<button class="color-variant-choice ${i===activeVariantIndex?'active':''} ${available?'':'is-out-stock'}" type="button" onclick="selectColorVariant(${i})" aria-pressed="${i===activeVariantIndex?'true':'false'}" ${available?'':'disabled'}><span>${escapeHtml(v.color || v.label || 'Colour')}</span>${available?'':'<small class="variant-stock-label">Out of stock</small>'}</button>`; }).join('')}</div></div>` : ''}
+        ${hasVariants ? `<div class="option-block"><b>Choose ${escapeHtml(optionTitle)}</b><div class="size-variant-options option-variant-options">${product.Variants.map((v,i)=>{ const available = variantIsAvailable(v); return `<button class="size-variant-choice ${i===activeVariantIndex?'active':''} ${available?'':'is-out-stock'}" type="button" onclick="selectVariant(${i})" ${available?'':'disabled'}><span>${escapeHtml(v.label || 'Standard')}</span>${available?'':'<small class="variant-stock-label">Out of stock</small>'}</button>`; }).join('')}</div></div>` : ''}
         ${colorMode && hasVisibleSizes(product, variant) ? `<div class="option-block"><b>Choose size</b><div class="size-variant-options">${sizeOptions.map((size,i)=>`<button class="size-variant-choice ${i===activeSizeIndex?'active':''}" type="button" onclick="selectSizeOption(${i})">${escapeHtml(size)}</button>`).join('')}</div></div>` : ''}
         ${!colorMode && colors.length ? `<div class="option-block"><b>Choose colour</b><div id="colorOptions" class="color-variant-options">${colors.map((c,i)=>`<button class="color-variant-choice ${i===0?'active':''}" type="button" onclick="activateColorChoice(this)" aria-pressed="${i===0?'true':'false'}"><span>${escapeHtml(c)}</span></button>`).join('')}</div></div>` : ''}
         <div class="option-block"><b>Quantity</b><div class="qty"><button type="button" onclick="changeQty(-1)">−</button><span id="qty">1</span><button type="button" onclick="changeQty(1)">+</button></div></div>
       </div>
       ${terms.length ? `<div class="terms-grid compact-terms stylish-terms">${terms.map(t => `<article><span class="term-icon">${escapeHtml(termSymbol(t))}</span><b>${escapeHtml(t.label)}</b>${t.description ? `<small>${escapeHtml(t.description)}</small>` : ''}</article>`).join('')}</div>` : ''}
-      ${productStockNote(product)}
-      <button class="btn primary full add-cart-button" ${productIsAvailable(product) ? 'onclick="handleAddToCart()"' : 'disabled'}>${productIsAvailable(product) ? 'Add to Cart' : 'Out of stock'}</button>
+      ${productStockNote(product, variant)}
+      <button class="btn primary full add-cart-button" ${productIsAvailable(product, variant) ? 'onclick="handleAddToCart()"' : 'disabled'}>${productIsAvailable(product, variant) ? 'Add to Cart' : 'Out of stock'}</button>
       <div class="detail-mini-actions"><button class="share-product-btn" type="button" onclick="shareProductLink()">Share product</button><a class="detail-back-link" href="catalog.html">← Back to catalog</a></div>
     </div>`;
 }
@@ -843,8 +859,8 @@ function openVariantSheet(){
 }
 function selectVariantFromSheet(index){ selectVariant(index); closeChoiceModal(); }
 function selectProductImage(index){ activeImageIndex = index; renderProductDetail(); }
-function selectVariant(index){ activeVariantIndex = index; activeSizeIndex = 0; activeImageIndex = 0; renderProductDetail(); }
-function selectColorVariant(index){ activeVariantIndex = index; activeSizeIndex = 0; activeImageIndex = 0; renderProductDetail(); }
+function selectVariant(index){ const variant = activeProduct?.Variants?.[index]; if(!variantIsAvailable(variant)){ showSoftToast('This option is out of stock'); return; } activeVariantIndex = index; activeSizeIndex = 0; activeImageIndex = 0; renderProductDetail(); }
+function selectColorVariant(index){ const variant = activeProduct?.Variants?.[index]; if(!variantIsAvailable(variant)){ showSoftToast('This colour is out of stock'); return; } activeVariantIndex = index; activeSizeIndex = 0; activeImageIndex = 0; renderProductDetail(); }
 function selectSizeOption(index){ activeSizeIndex = index; renderProductDetail(); }
 function activateChip(button){
   button.parentElement.querySelectorAll('.chip').forEach(chip => chip.classList.remove('active'));
@@ -862,8 +878,8 @@ function changeQty(amount){
 function handleAddToCart(){
   const product = activeProduct;
   if(!product) return;
-  if(!productIsAvailable(product)){ showSoftToast('This item is out of stock. Contact to check availability.'); return; }
   const variant = selectedProductVariant(product);
+  if(!productIsAvailable(product, variant)){ showSoftToast('This selected option is out of stock'); return; }
   const colorMode = isColorVariantMode(product);
   const gallery = productGalleryImages(product, variant);
   const image = firstImage(gallery, product.Image);
@@ -879,7 +895,8 @@ function handleAddToCart(){
     price: variant.price || product.Price,
     mrp: variant.mrp || product.MRP,
     subcategory: product.Subcategory,
-    terms: product.Terms
+    terms: product.Terms,
+    stockStatus: variant.stockStatus || product.StockStatus || 'in_stock'
   });
 }
 function shareProductLink(){
@@ -909,6 +926,6 @@ document.addEventListener('visibilitychange', () => {
   if(document.getElementById('productGrid') && (catalogState.category || catalogState.query)) loadCatalogProducts(true);
   if(document.getElementById('productDetail') && activeProduct){
     const params = new URLSearchParams(location.search);
-    findProduct(params.get('cat') || '', params.get('id') || '', {forceRefresh:true}).then(p => { if(p){ activeProduct = p; activeVariantIndex = Math.max(0, Math.min(activeVariantIndex, (p.Variants||[]).length-1)); activeSizeIndex = 0; renderProductDetail(); } }).catch(()=>{});
+    findProduct(params.get('cat') || '', params.get('id') || '', {forceRefresh:true}).then(p => { if(p){ activeProduct = p; activeVariantIndex = Math.max(0, Math.min(activeVariantIndex, (p.Variants||[]).length-1)); if(!variantIsAvailable(p.Variants?.[activeVariantIndex])) activeVariantIndex = firstAvailableVariantIndex(p); activeSizeIndex = 0; renderProductDetail(); } }).catch(()=>{});
   }
 });

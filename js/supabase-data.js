@@ -1,4 +1,4 @@
-/* Wellone customer data v46 — Supabase only
+/* Wellone customer data v51 — Supabase only
    Supabase Database + Supabase Storage only.
 */
 'use strict';
@@ -15,13 +15,13 @@ const PRODUCT_DETAIL_SELECT = `
   categories(id,name,image_url),
   subcategories(id,name),
   product_images(id,image_url,storage_path,sort_order),
-  product_variants(id,label,mrp,price,image_url,image_urls,terms,unit,stock,sort_order)
+  product_variants(id,label,mrp,price,image_url,image_urls,terms,unit,stock,stock_status,sort_order)
 `;
 const PRODUCT_LIST_SELECT = `
   id,name,slug,description,mrp,price,main_image_url,status,stock_status,sizes,colors,option_title,terms,created_at,updated_at,sort_order,
   categories(id,name,image_url),
   subcategories(id,name),
-  product_variants(id,label,mrp,price,unit,stock,sort_order)
+  product_variants(id,label,mrp,price,unit,stock,stock_status,sort_order)
 `;
 
 function supabaseClient(){
@@ -38,13 +38,13 @@ function sameName(a,b){ return cleanText(a).toLowerCase() === cleanText(b).toLow
 function normalizePrice(value){ return cleanText(value).replace(/^₹\s*/,'').replace(/,/g,''); }
 function money(value){ const n = Number(normalizePrice(value)); return Number.isFinite(n) && n > 0 ? n : 0; }
 function formatPrice(value){ const n = money(value); return n ? `₹${n}` : ''; }
-function cacheKey(name){ return 'wellone_supabase_v46_' + name; }
+function cacheKey(name){ return 'wellone_supabase_v51_' + name; }
 function now(){ return Date.now(); }
 function readAnyCache(name){ try{ const raw = localStorage.getItem(cacheKey(name)); if(!raw) return null; const pack = JSON.parse(raw); return pack && pack.data ? pack.data : null; }catch(e){ return null; } }
 function readFastCache(name){ try{ const raw = localStorage.getItem(cacheKey(name)); if(!raw) return null; const pack = JSON.parse(raw); if(!pack || !pack.time || now() - pack.time > FAST_CACHE_MS) return null; return pack.data || null; }catch(e){ return null; } }
 function pruneWelloneCache(maxEntries = 42){
   try{
-    const prefix = 'wellone_supabase_v46_';
+    const prefix = 'wellone_supabase_v51_';
     const entries = [];
     for(let i=0;i<localStorage.length;i++){
       const key = localStorage.key(i);
@@ -164,7 +164,8 @@ function normalizeProduct(row){
         images: ownImages.length ? ownImages : product.Images,
         hasOwnImages: ownImages.length > 0,
         terms: [],
-        stock: Number(v.stock || 0)
+        stock: Number(v.stock || 0),
+        stockStatus: cleanText(v.stock_status || 'in_stock')
       };
     });
   const colorDbVariants = dbVariants.filter(v => cleanText(v.color));
@@ -182,6 +183,7 @@ function normalizeProduct(row){
       hasOwnImages:false,
       terms:[],
       stock:0,
+      stockStatus:'in_stock',
       isBase:i === 0
     }));
     colorDbVariants.forEach(v => {
@@ -203,6 +205,7 @@ function normalizeProduct(row){
       hasOwnImages:false,
       terms:[],
       stock:0,
+      stockStatus:'in_stock',
       isBase:i === 0
     }));
     if(legacyDbVariants.length){

@@ -2237,3 +2237,8 @@ html.product-image-viewer-open,html.product-image-viewer-open body{overflow:hidd
   .product-image-viewer-thumb{flex-basis:48px;width:48px;height:56px}
 }
 
+/* Keep all product options visible and show variant-only availability. */
+.option-variant-options .size-variant-choice{min-width:64px;flex-direction:column;line-height:1.05}
+.color-variant-choice .variant-stock-label,.size-variant-choice .variant-stock-label{display:block;font-size:10px;line-height:1.1;color:#a12815;font-weight:850;white-space:nowrap}
+.color-variant-choice.is-out-stock,.size-variant-choice.is-out-stock,.color-variant-choice:disabled,.size-variant-choice:disabled{opacity:.62;cursor:not-allowed;background:#f7f7f3;border-color:#d9dfce;color:#7c8674;box-shadow:none}
+.color-variant-choice:disabled:hover,.size-variant-choice:disabled:hover{background:#f7f7f3;border-color:#d9dfce}

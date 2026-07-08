@@ -231,10 +231,10 @@ async function getLiveCartProduct(item){
   if(window.supabase && window.SITE_CONFIG){
     const client = window.__welloneSupabase || window.supabase.createClient(SITE_CONFIG.supabaseUrl, SITE_CONFIG.supabaseAnonKey);
     window.__welloneSupabase = client;
-    const {data, error} = await client.from('products').select('id,name,mrp,price,status,stock_status,main_image_url,sizes,colors,option_title,product_variants(label,unit,mrp,price,image_url,image_urls,stock,sort_order)').eq('id', item.id).maybeSingle();
+    const {data, error} = await client.from('products').select('id,name,mrp,price,status,stock_status,main_image_url,sizes,colors,option_title,product_variants(label,unit,mrp,price,image_url,image_urls,stock,stock_status,sort_order)').eq('id', item.id).maybeSingle();
     if(error) throw error;
     if(!data) return null;
-    return {ID:data.id, Name:data.name, MRP:data.mrp, Price:data.price, Status:data.status, StockStatus:data.stock_status, Image:data.main_image_url, Sizes:data.sizes, Colors:data.colors, VariantMode:(data.product_variants||[]).some(v=>cartText(v.unit))?'color':'option', Variants:(data.product_variants||[]).map(v=>({label:v.unit || v.label || 'Standard', color:v.unit || '', sizeOptions:cartText(v.label).split(/[|,\n]+/).map(x=>x.trim()).filter(Boolean), price:v.price || data.price, mrp:v.mrp || data.mrp, images:(v.image_urls&&v.image_urls.length?v.image_urls:[v.image_url].filter(Boolean)), stock:v.stock}))};
+    return {ID:data.id, Name:data.name, MRP:data.mrp, Price:data.price, Status:data.status, StockStatus:data.stock_status, Image:data.main_image_url, Sizes:data.sizes, Colors:data.colors, VariantMode:(data.product_variants||[]).some(v=>cartText(v.unit))?'color':'option', Variants:(data.product_variants||[]).map(v=>({label:v.unit || v.label || 'Standard', color:v.unit || '', sizeOptions:cartText(v.label).split(/[|,\n]+/).map(x=>x.trim()).filter(Boolean), price:v.price || data.price, mrp:v.mrp || data.mrp, images:(v.image_urls&&v.image_urls.length?v.image_urls:[v.image_url].filter(Boolean)), stock:v.stock, stockStatus:cartText(v.stock_status || 'in_stock')}))};
   }
   return null;
 }
@@ -285,6 +285,11 @@ async function checkCartAvailabilityAndRefresh(){
             message = `${item.name} option ${wantedSize} is not available now. Contact ${shopPhonePretty()} to check support.`;
           }
         }
+        if(status === 'ok' && matched && cartText(matched.stockStatus || matched.stock_status || 'in_stock') === 'out_of_stock'){
+          status = 'out_of_stock';
+          const selectedLabel = colorMode && wantedColor.toLowerCase() !== 'default' ? `colour ${wantedColor}` : `option ${wantedSize}`;
+          message = `${item.name} ${selectedLabel} is out of stock now. Contact ${shopPhonePretty()} for latest availability.`;
+        }
       }
 
       if(status !== 'ok'){
@@ -311,7 +316,7 @@ async function checkCartAvailabilityAndRefresh(){
       if(newMrp !== item.mrp){ item.mrp = newMrp; changed = true; }
       const newImage = cartText((matched.images && matched.images[0]) || live.Image || item.image);
       if(newImage && newImage !== item.image){ item.image = newImage; changed = true; }
-      item.stockStatus = cartText(live.StockStatus || 'in_stock');
+      item.stockStatus = cartText(matched.stockStatus || matched.stock_status || live.StockStatus || 'in_stock');
     }catch(e){
       // If live check fails due to network, do not block customer. WhatsApp message still asks final confirmation.
     }
