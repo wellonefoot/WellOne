@@ -598,11 +598,6 @@ function selectedVariantText(){
   return `${variant.label || 'Standard'}`;
 }
 function termSymbol(term){
-  const label = cleanText(term.label || term.name).toLowerCase();
-  if(label.includes('cod') || label.includes('cash')) return '₹';
-  if(label.includes('return')) return '7';
-  if(label.includes('exchange')) return '↔';
-  if(label.includes('refund') || label.includes('non')) return '×';
   return cleanText(term.icon || '✓');
 }
 function variantIsAvailable(variant){
@@ -700,7 +695,7 @@ function renderProductDetail(){
         ${!colorMode && colors.length ? `<div class="option-block"><b>Choose colour</b><div id="colorOptions" class="color-variant-options">${colors.map((c,i)=>`<button class="color-variant-choice ${i===0?'active':''}" type="button" onclick="activateColorChoice(this)" aria-pressed="${i===0?'true':'false'}"><span>${escapeHtml(c)}</span></button>`).join('')}</div></div>` : ''}
         <div class="option-block"><b>Quantity</b><div class="qty"><button type="button" onclick="changeQty(-1)">−</button><span id="qty">1</span><button type="button" onclick="changeQty(1)">+</button></div></div>
       </div>
-      ${terms.length ? `<div class="terms-grid compact-terms stylish-terms">${terms.map(t => `<article><span class="term-icon">${escapeHtml(termSymbol(t))}</span><b>${escapeHtml(t.label)}</b>${t.description ? `<small>${escapeHtml(t.description)}</small>` : ''}</article>`).join('')}</div>` : ''}
+      ${terms.length ? `<div class="terms-grid compact-terms">${terms.map(t => `<article><span class="term-icon">${escapeHtml(termSymbol(t))}</span><b>${escapeHtml(t.label)}</b>${t.description ? `<small>${escapeHtml(t.description)}</small>` : ''}</article>`).join('')}</div>` : ''}
       ${productStockNote(product, variant)}
       <button class="btn primary full add-cart-button" ${productIsAvailable(product, variant) ? 'onclick="handleAddToCart()"' : 'disabled'}>${productIsAvailable(product, variant) ? 'Add to Cart' : 'Out of stock'}</button>
       <div class="detail-mini-actions"><button class="share-product-btn" type="button" onclick="shareProductLink()">Share product</button><a class="detail-back-link" href="catalog.html">← Back to catalog</a></div>
