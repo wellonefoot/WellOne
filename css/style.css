@@ -2242,3 +2242,14 @@ html.product-image-viewer-open,html.product-image-viewer-open body{overflow:hidd
 .color-variant-choice .variant-stock-label,.size-variant-choice .variant-stock-label{display:block;font-size:10px;line-height:1.1;color:#a12815;font-weight:850;white-space:nowrap}
 .color-variant-choice.is-out-stock,.size-variant-choice.is-out-stock,.color-variant-choice:disabled,.size-variant-choice:disabled{opacity:.62;cursor:not-allowed;background:#f7f7f3;border-color:#d9dfce;color:#7c8674;box-shadow:none}
 .color-variant-choice:disabled:hover,.size-variant-choice:disabled:hover{background:#f7f7f3;border-color:#d9dfce}
+
+/* v52: show the complete product description without ellipsis */
+.product-page .compact-product-copy .detail-description{
+  display:block!important;
+  -webkit-line-clamp:unset!important;
+  line-clamp:unset!important;
+  -webkit-box-orient:initial!important;
+  overflow:visible!important;
+  text-overflow:clip!important;
+  max-height:none!important;
+}
