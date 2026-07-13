@@ -12,9 +12,75 @@ let catalogState = {category:'', query:'', subcategory:'', sort:'newest', offset
 let activeProduct = null;
 let activeVariantIndex = 0;
 let activeSizeIndex = 0;
+let activeColorIndex = 0;
 let activeImageIndex = 0;
 const CATALOG_VIEW_TTL_MS = 30 * 60 * 1000;
 let catalogScrollTimer = null;
+const WELLONE_PUBLIC_ORIGIN = 'https://wellone.in';
+
+function absoluteWelloneUrl(relative = ''){
+  try{ return new URL(relative || '/', WELLONE_PUBLIC_ORIGIN + '/').href; }
+  catch(e){ return WELLONE_PUBLIC_ORIGIN + '/'; }
+}
+function setDocumentMeta(selector, attribute, value){
+  let element = document.querySelector(selector);
+  if(!element){
+    element = document.createElement('meta');
+    const match = selector.match(/^meta\[(name|property)="([^"]+)"\]$/);
+    if(match) element.setAttribute(match[1], match[2]);
+    document.head.appendChild(element);
+  }
+  element.setAttribute(attribute, value);
+}
+function setCanonicalUrl(url){
+  let canonical = document.getElementById('canonicalLink') || document.querySelector('link[rel="canonical"]');
+  if(!canonical){ canonical = document.createElement('link'); canonical.rel = 'canonical'; document.head.appendChild(canonical); }
+  canonical.href = url;
+}
+function updateCommonSeo({title, description, url, image = absoluteWelloneUrl('assets/logo.png'), type = 'website', robots = 'index,follow,max-image-preview:large,max-snippet:-1,max-video-preview:-1'}){
+  if(title) document.title = title;
+  setDocumentMeta('meta[name="description"]', 'content', description || '');
+  setDocumentMeta('meta[name="robots"]', 'content', robots);
+  setDocumentMeta('meta[property="og:title"]', 'content', title || 'Wellone Fancy & Footwear');
+  setDocumentMeta('meta[property="og:description"]', 'content', description || '');
+  setDocumentMeta('meta[property="og:type"]', 'content', type);
+  setDocumentMeta('meta[property="og:url"]', 'content', url);
+  setDocumentMeta('meta[property="og:image"]', 'content', image);
+  setDocumentMeta('meta[name="twitter:title"]', 'content', title || 'Wellone Fancy & Footwear');
+  setDocumentMeta('meta[name="twitter:description"]', 'content', description || '');
+  setDocumentMeta('meta[name="twitter:image"]', 'content', image);
+  setCanonicalUrl(url);
+}
+function updateCatalogSeo(){
+  if(!document.body.classList.contains('catalog-page')) return;
+  const category = cleanText(catalogState.category);
+  const query = cleanText(catalogState.query);
+  const subcategory = cleanText(catalogState.subcategory);
+  const params = new URLSearchParams();
+  if(category) params.set('cat', category);
+  if(subcategory && category) params.set('sub', subcategory);
+  const canonical = absoluteWelloneUrl(`catalog.html${params.toString() ? '?' + params.toString() : ''}`);
+  if(query){
+    updateCommonSeo({
+      title:`Search results for ${query} | Wellone`,
+      description:`Search Wellone Fancy & Footwear for ${query}. Browse matching products and choose the exact colour, size or option.`,
+      url:absoluteWelloneUrl('catalog.html'),
+      robots:'noindex,follow'
+    });
+    return;
+  }
+  const label = subcategory || category;
+  updateCommonSeo({
+    title: label ? `${label} | Wellone Fancy & Footwear` : 'Shop Footwear, Bags & Accessories | Wellone',
+    description: label ? `Browse ${label} products from Wellone Fancy & Footwear. Select the exact colour, size or option and order easily.` : 'Browse Wellone footwear, bags, cosmetics, fancy items and accessories. Select the exact option, colour or size and order easily.',
+    url:canonical
+  });
+}
+function upsertProductStructuredData(data){
+  let script = document.getElementById('productStructuredData');
+  if(!script){ script = document.createElement('script'); script.id = 'productStructuredData'; script.type = 'application/ld+json'; document.head.appendChild(script); }
+  script.textContent = JSON.stringify(data);
+}
 
 function attrSafeJs(value){
   return String(value ?? '')
@@ -117,10 +183,10 @@ function categoryCard(category){
   const name = escapeHtml(category.name);
   const url = categoryUrl(category.name);
   const desc = escapeHtml(category.description || `Discover premium ${category.name} collections.`);
-  return `<article class="cat-card premium-cat-card" data-cat="${name}" onclick="location.href='${url}'" tabindex="0" onkeydown="if(event.key==='Enter') location.href='${url}'">
+  return `<a class="cat-card premium-cat-card" data-cat="${name}" href="${url}" aria-label="Browse ${name}">
     <div class="media shimmer"><img loading="lazy" decoding="async" src="${optimizeImageUrl(category.image || SITE_CONFIG.defaultCategoryImage, 720)}" onload="this.parentElement.classList.remove('shimmer')" onerror="this.src=SITE_CONFIG.defaultCategoryImage" alt="${name}"></div>
     <div class="cat-copy"><h3>${name}</h3><p>${desc}</p><span class="cat-arrow" aria-hidden="true">→</span></div>
-  </article>`;
+  </a>`;
 }
 function renderCategoryHero(){
   const hero = document.getElementById('categoryHero');
@@ -158,19 +224,18 @@ function productCard(product, categoryName){
   const href = `product.html?cat=${safeCat}&id=${safeId}`;
   const jsCat = attrSafeJs(catName);
   const jsId = attrSafeJs(product.ID);
-  const jsHref = attrSafeJs(href);
   const sub = product.Subcategory ? `<span class="product-badge">${escapeHtml(product.Subcategory)}</span>` : '';
   const catBadge = catalogState.global && catName ? `<span class="product-badge soft-badge">${escapeHtml(catName)}</span>` : '';
   const unavailable = product.StockStatus === 'out_of_stock';
   const stockBadge = unavailable ? `<span class="product-badge stock-badge">Out of stock</span>` : '';
-  return `<article class="product-card clickable-card ${unavailable ? 'is-out-stock' : ''}" data-product-id="${escapeHtml(product.ID)}" onclick="openProductFromCard('${jsCat}','${jsId}','${jsHref}')" onpointerenter="warmProductFromCard('${jsCat}','${jsId}')" ontouchstart="warmProductFromCard('${jsCat}','${jsId}')" tabindex="0" onkeydown="if(event.key==='Enter') openProductFromCard('${jsCat}','${jsId}','${jsHref}')">
+  return `<a class="product-card clickable-card ${unavailable ? 'is-out-stock' : ''}" data-product-id="${escapeHtml(product.ID)}" href="${href}" onclick="persistCatalogView();cacheProductForOpen('${jsCat}','${jsId}')" onpointerenter="warmProductFromCard('${jsCat}','${jsId}')" ontouchstart="warmProductFromCard('${jsCat}','${jsId}')" aria-label="View ${escapeHtml(product.Name)}">
     <div class="product-media shimmer"><img loading="lazy" decoding="async" src="${optimizeImageUrl(image, 620)}" onload="this.parentElement.classList.remove('shimmer')" onerror="this.src='${fallbackImageSync(catName)}'" alt="${escapeHtml(product.Name)}"></div>
     <div class="product-pad">
       ${catBadge}${sub}${stockBadge}<h3>${escapeHtml(product.Name)}</h3>
       ${priceHtml(product, variant)}
-      <button onclick="event.stopPropagation(); openProductFromCard('${jsCat}','${jsId}','${jsHref}')">View</button>
+      <span class="product-card-view">View</span>
     </div>
-  </article>`;
+  </a>`;
 }
 
 function offerCard(offer, index = 0){
@@ -371,6 +436,7 @@ async function initCatalog(){
   catalogState.subcategory = params.get('sub') || '';
   catalogState.sort = params.get('sort') || 'newest';
   catalogState.global = !catalogState.category && !!catalogState.query;
+  updateCatalogSeo();
   const searchInput = document.getElementById('catalogSearchInput');
   if(searchInput) searchInput.value = catalogState.query;
   updateSortButton();
@@ -394,6 +460,7 @@ async function initCatalog(){
     const realCategory = categories.find(cat => sameName(cat.name, catalogState.category));
     catalogState.category = realCategory ? realCategory.name : catalogState.category;
     catalogState.global = false;
+    updateCatalogSeo();
     await renderFilterChips();
   }else{
     catalogState.global = true;
@@ -438,6 +505,7 @@ function updateCatalogUrl(){
   if(catalogState.subcategory && catalogState.category) params.set('sub', catalogState.subcategory);
   if(catalogState.sort && catalogState.sort !== 'newest') params.set('sort', catalogState.sort);
   history.replaceState(null, '', `catalog.html${params.toString() ? '?' + params.toString() : ''}`);
+  updateCatalogSeo();
 }
 function renderCatalogCategories(categories){
   const grid = document.getElementById('categoryGrid');
@@ -530,23 +598,25 @@ async function initProduct(){
   const instantProduct = getProductFromInstantCache(categoryName, productId);
   if(instantProduct && holder){
     activeProduct = instantProduct;
-    activeVariantIndex = firstAvailableVariantIndex(instantProduct);
     activeSizeIndex = 0;
+    activeColorIndex = 0;
     activeImageIndex = 0;
+    applyProductSelectionFromUrl(instantProduct, params);
     renderProductDetail();
   }else if(holder){
     holder.innerHTML = `<div class="product-detail-skeleton"><div class="shimmer"></div><div><b></b><span></span><span></span><button></button></div></div>`;
   }
-  await Promise.all([loadCategories(true), loadTerms(true)]);
+  await loadCategories(true);
   const product = await findProduct(categoryName, productId, {forceRefresh:true});
   if(!product || cleanText(product.Status || 'active') !== 'active' || !holder){
     if(holder) holder.innerHTML = `<div class="empty-card"><h2>Product not found</h2><p>Please open the item again from catalog.</p></div>`;
     return;
   }
   activeProduct = product;
-  activeVariantIndex = firstAvailableVariantIndex(product);
   activeSizeIndex = 0;
+  activeColorIndex = 0;
   activeImageIndex = 0;
+  applyProductSelectionFromUrl(product, params);
   renderProductDetail();
 }
 
@@ -587,6 +657,124 @@ function selectedSizeText(){
   const options = selectedSizeOptions();
   return options[activeSizeIndex] || options[0] || 'Standard';
 }
+function standaloneColors(product = activeProduct){
+  const values = splitOptions(product && product.Colors || '');
+  return (values.length === 1 && cleanKey(values[0]) === 'default') ? [] : values;
+}
+function selectedStandaloneColorText(product = activeProduct){
+  const colors = standaloneColors(product);
+  return colors[activeColorIndex] || colors[0] || 'Default';
+}
+function currentProductRelativeUrl(product = activeProduct){
+  if(!product) return 'product.html';
+  const params = new URLSearchParams();
+  const category = cleanText(product.Category || new URLSearchParams(location.search).get('cat'));
+  const id = cleanText(product.ID || new URLSearchParams(location.search).get('id'));
+  if(category) params.set('cat', category);
+  if(id) params.set('id', id);
+  const variant = selectedProductVariant(product);
+  const colorMode = isColorVariantMode(product);
+  if(colorMode){
+    const color = cleanText(variant.color || variant.label);
+    if(color && cleanKey(color) !== 'default'){
+      params.set('variant', color);
+      params.set('color', color);
+    }
+    const size = selectedSizeText();
+    if(size && cleanKey(size) !== 'standard') params.set('size', size);
+  }else{
+    const variantLabel = cleanText(variant.label || 'Standard');
+    if(variantLabel && cleanKey(variantLabel) !== 'standard') params.set('variant', variantLabel);
+    const color = selectedStandaloneColorText(product);
+    if(color && cleanKey(color) !== 'default') params.set('color', color);
+  }
+  return `product.html${params.toString() ? '?' + params.toString() : ''}`;
+}
+function currentProductAbsoluteUrl(product = activeProduct){ return absoluteWelloneUrl(currentProductRelativeUrl(product)); }
+function applyProductSelectionFromUrl(product, params = new URLSearchParams(location.search)){
+  if(!product) return;
+  const variants = Array.isArray(product.Variants) ? product.Variants : [];
+  const wantedVariant = cleanText(params.get('variant'));
+  const wantedColor = cleanText(params.get('color'));
+  const wantedSize = cleanText(params.get('size'));
+  const colorMode = isColorVariantMode(product);
+  let variantIndex = -1;
+  if(variants.length){
+    const wanted = colorMode ? (wantedColor || wantedVariant) : (wantedVariant || wantedSize);
+    if(wanted){
+      variantIndex = variants.findIndex(v => cleanKey(colorMode ? (v.color || v.label) : v.label) === cleanKey(wanted));
+    }
+    activeVariantIndex = variantIndex >= 0 ? variantIndex : firstAvailableVariantIndex(product);
+  }else activeVariantIndex = 0;
+  const variant = selectedProductVariant(product);
+  const sizes = selectedSizeOptions(product, variant);
+  const sizeIndex = wantedSize ? sizes.findIndex(size => cleanKey(size) === cleanKey(wantedSize)) : -1;
+  activeSizeIndex = sizeIndex >= 0 ? sizeIndex : 0;
+  const colors = standaloneColors(product);
+  const colorIndex = wantedColor ? colors.findIndex(color => cleanKey(color) === cleanKey(wantedColor)) : -1;
+  activeColorIndex = colorIndex >= 0 ? colorIndex : 0;
+}
+function syncProductSelectionUrl(product = activeProduct){
+  if(!product || !document.body.classList.contains('product-page')) return;
+  const relative = currentProductRelativeUrl(product);
+  const current = `${location.pathname.split('/').pop() || 'product.html'}${location.search}`;
+  if(current !== relative) history.replaceState(null, '', relative);
+}
+function selectedProductDescriptor(product = activeProduct){
+  if(!product) return '';
+  const variant = selectedProductVariant(product);
+  const parts = [];
+  if(isColorVariantMode(product)){
+    const color = cleanText(variant.color || variant.label);
+    if(color && cleanKey(color) !== 'default') parts.push(color);
+    const size = selectedSizeText();
+    if(size && cleanKey(size) !== 'standard') parts.push(size);
+  }else{
+    const label = cleanText(variant.label || 'Standard');
+    if(label && cleanKey(label) !== 'standard') parts.push(label);
+    const color = selectedStandaloneColorText(product);
+    if(color && cleanKey(color) !== 'default') parts.push(color);
+  }
+  return parts.join(' • ');
+}
+function updateProductSeo(product = activeProduct, variant = selectedProductVariant(product), images = productGalleryImages(product, variant)){
+  if(!product || !document.body.classList.contains('product-page')) return;
+  const descriptor = selectedProductDescriptor(product);
+  const title = `${product.Name}${descriptor ? ' - ' + descriptor : ''} | Wellone`;
+  const descriptionBase = cleanText(product.Description || `Shop ${product.Name} from Wellone Fancy & Footwear.`);
+  const description = `${descriptionBase}${descriptor ? ` Selected option: ${descriptor}.` : ''}`.slice(0, 300);
+  const url = currentProductAbsoluteUrl(product);
+  const image = absoluteWelloneUrl((images && images[0]) || product.Image || 'assets/logo.png');
+  updateCommonSeo({title, description, url, image, type:'product'});
+  const price = money((variant && variant.price) || product.Price || 0);
+  const available = productIsAvailable(product, variant);
+  const structured = {
+    '@context':'https://schema.org',
+    '@type':'Product',
+    '@id':url + '#product',
+    name:product.Name + (descriptor ? ` - ${descriptor}` : ''),
+    description,
+    image:(images || []).map(img => absoluteWelloneUrl(img)).slice(0,8),
+    sku:[product.ID, descriptor].filter(Boolean).join('-'),
+    category:[product.Category, product.Subcategory].filter(Boolean).join(' > '),
+    brand:{'@type':'Brand',name:'Wellone'}
+  };
+  if(price > 0){
+    structured.offers = {
+      '@type':'Offer',url,priceCurrency:'INR',price:String(price),
+      availability:available ? 'https://schema.org/InStock' : 'https://schema.org/OutOfStock',
+      itemCondition:'https://schema.org/NewCondition',
+      seller:{'@type':'Organization',name:'Wellone Fancy & Footwear'}
+    };
+  }
+  const color = isColorVariantMode(product) ? cleanText(variant.color || variant.label) : selectedStandaloneColorText(product);
+  const size = isColorVariantMode(product) ? selectedSizeText() : cleanText(variant.label);
+  if(color && cleanKey(color) !== 'default') structured.color = color;
+  if(size && cleanKey(size) !== 'standard') structured.size = size;
+  upsertProductStructuredData(structured);
+  setDocumentMeta('meta[property="product:price:amount"]', 'content', String(price || 0));
+  setDocumentMeta('meta[property="product:price:currency"]', 'content', 'INR');
+}
 function hasVisibleSizes(product = activeProduct, variant = selectedProductVariant(product)){
   const options = selectedSizeOptions(product, variant);
   return options.length > 1 || (options[0] && cleanKey(options[0]) !== 'standard');
@@ -597,13 +785,37 @@ function selectedVariantText(){
   const variant = product.Variants[activeVariantIndex] || product.Variants[0] || {};
   return `${variant.label || 'Standard'}`;
 }
-function termSymbol(term){
-  const label = cleanText(term.label || term.name).toLowerCase();
-  if(label.includes('cod') || label.includes('cash')) return '₹';
-  if(label.includes('return')) return '7';
-  if(label.includes('exchange')) return '↔';
-  if(label.includes('refund') || label.includes('non')) return '×';
-  return cleanText(term.icon || '✓');
+// Add a future selectable policy here, then add its SVG path in policyIconSvg().
+const FIXED_PRODUCT_TERMS = Object.freeze([
+  {key:'exchange', label:'7 Day Exchange Policy', description:'Eligible items can be exchanged within 7 days.'},
+  {key:'delivery', label:'Free Delivery', description:'No delivery charge for this product.'},
+  {key:'no-return', label:'No Return Allowed', description:'Returns and refunds are not available.'},
+  {key:'pay-delivery', label:'Pay on Delivery', description:'Pay when your order is delivered.'},
+  {key:'secure', label:'Secure Transaction', description:'Your order details are handled securely.'}
+]);
+function policyKeyFromLabel(value){
+  const label = cleanKey(value);
+  if(!label) return '';
+  if(label.includes('exchange')) return 'exchange';
+  if((label.includes('free') || label.includes('nocharge')) && (label.includes('delivery') || label.includes('shipping'))) return 'delivery';
+  if((label.includes('no') || label.includes('non')) && (label.includes('return') || label.includes('refund'))) return 'no-return';
+  if(label.includes('payondelivery') || label.includes('cashondelivery') || label === 'cod') return 'pay-delivery';
+  if(label.includes('secure') && (label.includes('transaction') || label.includes('payment') || label.includes('order'))) return 'secure';
+  return '';
+}
+function selectedPolicyTerms(value){
+  const selectedKeys = new Set(parseTerms(value).map(policyKeyFromLabel).filter(Boolean));
+  return FIXED_PRODUCT_TERMS.filter(term => selectedKeys.has(term.key));
+}
+function policyIconSvg(type){
+  const icons = {
+    exchange:'<path d="M7 7h10l-2.5-2.5M17 17H7l2.5 2.5"/><path d="M17 7l2.5 2.5L17 12M7 17l-2.5-2.5L7 12"/>',
+    delivery:'<path d="M3 6h11v10H3z"/><path d="M14 10h4l3 3v3h-7z"/><circle cx="7" cy="18" r="2"/><circle cx="18" cy="18" r="2"/>',
+    'no-return':'<path d="M9 7H5v4"/><path d="M5.5 10.5A7 7 0 0 1 18 8"/><path d="M18.5 13.5A7 7 0 0 1 7 17"/><path d="M4 4l16 16"/>',
+    'pay-delivery':'<path d="M4 7h13a2 2 0 0 1 2 2v9H4z"/><path d="M4 7l2-3h11l2 3"/><circle cx="15.5" cy="13" r="2.5"/><path d="M15.5 11.5v3M14.5 12.2h1.5M14.5 13.8h1.5"/>',
+    secure:'<path d="M12 3l7 3v5c0 4.7-2.8 8.1-7 10-4.2-1.9-7-5.3-7-10V6z"/><path d="M8.5 12.5l2.2 2.2 4.8-5"/>'
+  };
+  return `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">${icons[type] || icons.secure}</svg>`;
 }
 function variantIsAvailable(variant){
   return !variant || cleanText(variant.stockStatus || variant.stock_status || 'in_stock') !== 'out_of_stock';
@@ -681,7 +893,7 @@ function renderProductDetail(){
   const activeImage = optimizeImageUrl(images[activeImageIndex] || product.Image || fallbackImageSync(product.Category), 1000);
   const colorsRaw = splitOptions(product.Colors || '');
   const colors = (colorsRaw.length === 1 && colorsRaw[0].toLowerCase() === 'default') ? [] : colorsRaw;
-  const terms = selectedTermObjects(product.Terms, termsCache);
+  const terms = selectedPolicyTerms(product.Terms);
   const hasVariants = !colorMode && hasSelectableOptions(product);
   const optionTitle = productOptionTitle(product);
   holder.innerHTML = `<div class="detail-gallery compact-product-gallery">
@@ -694,17 +906,19 @@ function renderProductDetail(){
       ${product.Description ? `<p class="muted detail-description">${escapeHtml(product.Description)}</p>` : ''}
       ${priceHtml(product, variant)}
       <div class="detail-option-card">
-        ${colorMode ? `<div class="option-block"><b>Choose colour</b><div class="color-variant-options">${product.Variants.map((v,i)=>{ const available = variantIsAvailable(v); return `<button class="color-variant-choice ${i===activeVariantIndex?'active':''} ${available?'':'is-out-stock'}" type="button" onclick="selectColorVariant(${i})" aria-pressed="${i===activeVariantIndex?'true':'false'}" ${available?'':'disabled'}><span>${escapeHtml(v.color || v.label || 'Colour')}</span>${available?'':'<small class="variant-stock-label">Out of stock</small>'}</button>`; }).join('')}</div></div>` : ''}
-        ${hasVariants ? `<div class="option-block"><b>Choose ${escapeHtml(optionTitle)}</b><div class="size-variant-options option-variant-options">${product.Variants.map((v,i)=>{ const available = variantIsAvailable(v); return `<button class="size-variant-choice ${i===activeVariantIndex?'active':''} ${available?'':'is-out-stock'}" type="button" onclick="selectVariant(${i})" ${available?'':'disabled'}><span>${escapeHtml(v.label || 'Standard')}</span>${available?'':'<small class="variant-stock-label">Out of stock</small>'}</button>`; }).join('')}</div></div>` : ''}
+        ${colorMode ? `<div class="option-block"><b>Choose colour</b><div class="color-variant-options">${product.Variants.map((v,i)=>{ const available = variantIsAvailable(v); return `<button class="color-variant-choice ${i===activeVariantIndex?'active':''} ${available?'':'is-out-stock'}" type="button" onclick="selectColorVariant(${i})" aria-pressed="${i===activeVariantIndex?'true':'false'}" ${available?'':`title="View and share this out-of-stock colour"`}><span>${escapeHtml(v.color || v.label || 'Colour')}</span>${available?'':'<small class="variant-stock-label">Out of stock</small>'}</button>`; }).join('')}</div></div>` : ''}
+        ${hasVariants ? `<div class="option-block"><b>Choose ${escapeHtml(optionTitle)}</b><div class="size-variant-options option-variant-options">${product.Variants.map((v,i)=>{ const available = variantIsAvailable(v); return `<button class="size-variant-choice ${i===activeVariantIndex?'active':''} ${available?'':'is-out-stock'}" type="button" onclick="selectVariant(${i})" ${available?'':`title="View and share this out-of-stock option"`}><span>${escapeHtml(v.label || 'Standard')}</span>${available?'':'<small class="variant-stock-label">Out of stock</small>'}</button>`; }).join('')}</div></div>` : ''}
         ${colorMode && hasVisibleSizes(product, variant) ? `<div class="option-block"><b>Choose size</b><div class="size-variant-options">${sizeOptions.map((size,i)=>`<button class="size-variant-choice ${i===activeSizeIndex?'active':''}" type="button" onclick="selectSizeOption(${i})">${escapeHtml(size)}</button>`).join('')}</div></div>` : ''}
-        ${!colorMode && colors.length ? `<div class="option-block"><b>Choose colour</b><div id="colorOptions" class="color-variant-options">${colors.map((c,i)=>`<button class="color-variant-choice ${i===0?'active':''}" type="button" onclick="activateColorChoice(this)" aria-pressed="${i===0?'true':'false'}"><span>${escapeHtml(c)}</span></button>`).join('')}</div></div>` : ''}
+        ${!colorMode && colors.length ? `<div class="option-block"><b>Choose colour</b><div id="colorOptions" class="color-variant-options">${colors.map((c,i)=>`<button class="color-variant-choice ${i===activeColorIndex?'active':''}" type="button" onclick="activateColorChoice(this,${i})" aria-pressed="${i===activeColorIndex?'true':'false'}"><span>${escapeHtml(c)}</span></button>`).join('')}</div></div>` : ''}
         <div class="option-block"><b>Quantity</b><div class="qty"><button type="button" onclick="changeQty(-1)">−</button><span id="qty">1</span><button type="button" onclick="changeQty(1)">+</button></div></div>
       </div>
-      ${terms.length ? `<div class="terms-grid compact-terms stylish-terms">${terms.map(t => `<article><span class="term-icon">${escapeHtml(termSymbol(t))}</span><b>${escapeHtml(t.label)}</b>${t.description ? `<small>${escapeHtml(t.description)}</small>` : ''}</article>`).join('')}</div>` : ''}
+      ${terms.length ? `<section class="product-policy-section" aria-label="Product policies"><p class="product-policy-title">Product policies</p><div class="terms-grid compact-terms stylish-terms">${terms.map(term => `<article><span class="term-icon">${policyIconSvg(term.key)}</span><span class="term-copy"><b>${escapeHtml(term.label)}</b><small>${escapeHtml(term.description)}</small></span></article>`).join('')}</div></section>` : ''}
       ${productStockNote(product, variant)}
       <button class="btn primary full add-cart-button" ${productIsAvailable(product, variant) ? 'onclick="handleAddToCart()"' : 'disabled'}>${productIsAvailable(product, variant) ? 'Add to Cart' : 'Out of stock'}</button>
-      <div class="detail-mini-actions"><button class="share-product-btn" type="button" onclick="shareProductLink()">Share product</button><a class="detail-back-link" href="catalog.html">← Back to catalog</a></div>
+      <div class="detail-mini-actions"><button class="share-product-btn" type="button" onclick="shareProductLink()">Share selected option</button><a class="detail-back-link" href="catalog.html">← Back to catalog</a></div>
     </div>`;
+  syncProductSelectionUrl(product);
+  updateProductSeo(product, variant, images);
 }
 let productImageZoomLevel = 1;
 let productImagePinchStartDistance = 0;
@@ -859,17 +1073,36 @@ function openVariantSheet(){
 }
 function selectVariantFromSheet(index){ selectVariant(index); closeChoiceModal(); }
 function selectProductImage(index){ activeImageIndex = index; renderProductDetail(); }
-function selectVariant(index){ const variant = activeProduct?.Variants?.[index]; if(!variantIsAvailable(variant)){ showSoftToast('This option is out of stock'); return; } activeVariantIndex = index; activeSizeIndex = 0; activeImageIndex = 0; renderProductDetail(); }
-function selectColorVariant(index){ const variant = activeProduct?.Variants?.[index]; if(!variantIsAvailable(variant)){ showSoftToast('This colour is out of stock'); return; } activeVariantIndex = index; activeSizeIndex = 0; activeImageIndex = 0; renderProductDetail(); }
+function selectVariant(index){
+  const variant = activeProduct?.Variants?.[index];
+  if(!variant) return;
+  activeVariantIndex = index;
+  activeSizeIndex = 0;
+  activeImageIndex = 0;
+  renderProductDetail();
+  if(!variantIsAvailable(variant)) showSoftToast('Out of stock — link can still be shared');
+}
+function selectColorVariant(index){
+  const variant = activeProduct?.Variants?.[index];
+  if(!variant) return;
+  activeVariantIndex = index;
+  activeSizeIndex = 0;
+  activeImageIndex = 0;
+  renderProductDetail();
+  if(!variantIsAvailable(variant)) showSoftToast('Out of stock — link can still be shared');
+}
 function selectSizeOption(index){ activeSizeIndex = index; renderProductDetail(); }
 function activateChip(button){
   button.parentElement.querySelectorAll('.chip').forEach(chip => chip.classList.remove('active'));
   button.classList.add('active');
 }
-function activateColorChoice(button){
+function activateColorChoice(button, index = 0){
+  activeColorIndex = Math.max(0, Number(index) || 0);
   button.parentElement.querySelectorAll('.color-variant-choice').forEach(choice => { choice.classList.remove('active'); choice.setAttribute('aria-pressed','false'); });
   button.classList.add('active');
   button.setAttribute('aria-pressed','true');
+  syncProductSelectionUrl();
+  updateProductSeo();
 }
 function changeQty(amount){
   const qty = document.getElementById('qty');
@@ -884,7 +1117,7 @@ function handleAddToCart(){
   const gallery = productGalleryImages(product, variant);
   const image = firstImage(gallery, product.Image);
   const size = colorMode ? selectedSizeText() : (variant.label || 'Standard');
-  const color = colorMode ? (variant.color || variant.label || 'Default') : (document.querySelector('#colorOptions .active')?.textContent || 'Default');
+  const color = colorMode ? (variant.color || variant.label || 'Default') : selectedStandaloneColorText(product);
   addCartItem(product, {
     category: product.Category,
     image,
@@ -895,19 +1128,20 @@ function handleAddToCart(){
     price: variant.price || product.Price,
     mrp: variant.mrp || product.MRP,
     subcategory: product.Subcategory,
-    terms: product.Terms,
+    terms: selectedPolicyTerms(product.Terms).map(term => term.label),
     stockStatus: variant.stockStatus || product.StockStatus || 'in_stock'
   });
 }
 function shareProductLink(){
   const product = activeProduct;
-  const url = location.href;
-  const title = product ? `${product.Name} | Wellone` : 'Wellone product';
+  const descriptor = selectedProductDescriptor(product);
+  const url = currentProductAbsoluteUrl(product);
+  const title = product ? `${product.Name}${descriptor ? ' - ' + descriptor : ''} | Wellone` : 'Wellone product';
   if(navigator.share){
-    navigator.share({title, url}).catch(()=>{});
+    navigator.share({title, text:descriptor ? `Selected option: ${descriptor}` : '', url}).catch(()=>{});
     return;
   }
-  navigator.clipboard?.writeText(url).then(() => showSoftToast('Product link copied')).catch(() => { prompt('Copy product link', url); });
+  navigator.clipboard?.writeText(url).then(() => showSoftToast('Selected option link copied')).catch(() => { prompt('Copy selected option link', url); });
 }
 function initCartPage(){
   if(window.WelloneCart && typeof WelloneCart.renderCartItems === 'function') WelloneCart.renderCartItems();
@@ -926,6 +1160,6 @@ document.addEventListener('visibilitychange', () => {
   if(document.getElementById('productGrid') && (catalogState.category || catalogState.query)) loadCatalogProducts(true);
   if(document.getElementById('productDetail') && activeProduct){
     const params = new URLSearchParams(location.search);
-    findProduct(params.get('cat') || '', params.get('id') || '', {forceRefresh:true}).then(p => { if(p){ activeProduct = p; activeVariantIndex = Math.max(0, Math.min(activeVariantIndex, (p.Variants||[]).length-1)); if(!variantIsAvailable(p.Variants?.[activeVariantIndex])) activeVariantIndex = firstAvailableVariantIndex(p); activeSizeIndex = 0; renderProductDetail(); } }).catch(()=>{});
+    findProduct(params.get('cat') || '', params.get('id') || '', {forceRefresh:true}).then(p => { if(p){ activeProduct = p; applyProductSelectionFromUrl(p, params); activeImageIndex = 0; renderProductDetail(); } }).catch(()=>{});
   }
 });

@@ -2,7 +2,7 @@
   "id": "wellone-customer-catalog",
   "name": "Wellone Fancy & Footwear",
   "short_name": "Wellone",
-  "description": "Installable Wellone shopping catalog with fast product search and WhatsApp order.",
+  "description": "Shop footwear, bags, cosmetics and accessories from Wellone Fancy & Footwear in Edavannappara.",
   "start_url": "./index.html?source=pwa",
   "scope": "./",
   "display": "standalone",
@@ -10,8 +10,8 @@
     "standalone",
     "minimal-ui"
   ],
-  "background_color": "#f5fff4",
-  "theme_color": "#f5fff4",
+  "background_color": "#f7faef",
+  "theme_color": "#6f8f0d",
   "orientation": "portrait-primary",
   "categories": [
     "shopping",

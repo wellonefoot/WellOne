@@ -33,6 +33,29 @@ function cartImage(url, size = 520){
   }catch(e){}
   return url || (window.SITE_CONFIG && SITE_CONFIG.defaultCategoryImage) || '';
 }
+function cartProductRelativeLink(item){
+  const params = new URLSearchParams();
+  const category = cartText(item && item.category);
+  const id = cartText(item && item.id);
+  const variant = cartText(item && (item.variant || item.size), 'Standard');
+  const color = cartText(item && item.color, 'Default');
+  if(category) params.set('cat', category);
+  if(id) params.set('id', id);
+  if(variant && variant.toLowerCase() !== 'standard') params.set('variant', variant);
+  if(color && color.toLowerCase() !== 'default'){
+    params.set('color', color);
+    if(variant && variant.toLowerCase() !== 'standard') params.set('size', variant);
+  }
+  return `product.html${params.toString() ? '?' + params.toString() : ''}`;
+}
+function cartAbsoluteUrl(relativeUrl){
+  try{
+    const base = location.origin && !location.href.startsWith('file:')
+      ? location.origin + location.pathname.replace(/[^/]*$/, '')
+      : location.href.replace(/[^/]*$/, '');
+    return new URL(relativeUrl, base).href;
+  }catch(e){ return relativeUrl || ''; }
+}
 function normalizeTerms(value){
   const clean = term => {
     if(!term) return '';
@@ -191,10 +214,12 @@ function cartItemHtml(item, index){
     item.color && item.color !== 'Default' ? `<span>Color <b>${cartEscape(item.color)}</b></span>` : '',
     item.subcategory ? `<span>${cartEscape(item.subcategory)}</span>` : ''
   ].filter(Boolean).join('');
-  return `<article class="premium-cart-item ${hasAvailabilityIssue ? 'cart-item-issue' : ''}">
-    <div class="premium-cart-img shimmer"><img loading="lazy" decoding="async" src="${cartImage(item.image, 420)}" onload="this.parentElement.classList.remove('shimmer')" onerror="this.src=SITE_CONFIG.defaultCategoryImage" alt="${cartEscape(item.name)}"></div>
+  const productHref = cartProductRelativeLink(item);
+  const safeProductHref = cartEscape(productHref);
+  return `<article class="premium-cart-item cart-item-clickable ${hasAvailabilityIssue ? 'cart-item-issue' : ''}" data-product-url="${safeProductHref}" tabindex="0" role="link" aria-label="Open ${cartEscape(item.name)}">
+    <a class="premium-cart-img cart-item-image-link shimmer" href="${safeProductHref}" aria-label="Open ${cartEscape(item.name)}"><img loading="lazy" decoding="async" src="${cartImage(item.image, 420)}" onload="this.parentElement.classList.remove('shimmer')" onerror="this.src=SITE_CONFIG.defaultCategoryImage" alt="${cartEscape(item.name)}"></a>
     <div class="premium-cart-info">
-      <div class="premium-cart-top"><h3>${index+1}. ${cartEscape(item.name)}</h3><button class="cart-remove-x" type="button" onclick="removeCartItem('${safeKey}')" aria-label="Remove ${cartEscape(item.name)}">×</button></div>
+      <div class="premium-cart-top"><h3><a class="cart-item-title-link" href="${safeProductHref}">${index+1}. ${cartEscape(item.name)}</a></h3><button class="cart-remove-x" type="button" onclick="removeCartItem('${safeKey}')" aria-label="Remove ${cartEscape(item.name)}">×</button></div>
       <p class="premium-cart-cat">${cartEscape(item.category || 'Product')}${item.subcategory ? ' • ' + cartEscape(item.subcategory) : ''}</p>
       ${meta ? `<div class="premium-cart-meta">${meta}</div>` : ''}
       <div class="premium-cart-price"><strong>${cartPriceText(lineTotal)}</strong>${item.mrp && item.mrp > item.price ? `<del>${cartPriceText(item.mrp * qty)}</del>` : ''}${saving ? `<em>Save ${cartPriceText(saving)}</em>` : ''}</div>
@@ -373,10 +398,7 @@ function shopPhoneHref(){
   return n ? `tel:+${n}` : '#';
 }
 function orderProductLink(item){
-  try{
-    const base = location.origin && !location.href.startsWith('file:') ? location.origin + location.pathname.replace(/[^/]*$/, '') : location.href.replace(/[^/]*$/, '');
-    return new URL(`product.html?cat=${encodeURIComponent(item.category || '')}&id=${encodeURIComponent(item.id || '')}`, base).href;
-  }catch(e){ return ''; }
+  return cartAbsoluteUrl(cartProductRelativeLink(item));
 }
 function orderRef(){
   const date = new Date();
@@ -411,7 +433,7 @@ function orderMessage(customerName, customerPhone, customerAddress){
     message += `Rate: ${cartPriceText(item.price)}\n`;
     if(item.mrp && item.mrp > item.price) message += `MRP: ${cartPriceText(item.mrp)}\n`;
     message += `Item Total: ${cartPriceText(lineTotal)}\n`;
-    if(productLink) message += `Product Link: ${productLink}\n`;
+    if(productLink) message += `Selected Variant Link: ${productLink}\n`;
     if(item.image) message += `Image: ${item.image}\n`;
     if(item.terms && item.terms.length) message += `Terms: ${item.terms.join(', ')}\n`;
   });
@@ -536,9 +558,60 @@ function renderCartItems(){
   document.querySelectorAll('#drawerCheckoutForm,#pageCheckoutForm').forEach(el => el.classList.toggle('checkout-hidden', !cart.length || el.classList.contains('checkout-hidden')));
 }
 
+function setupCartItemNavigation(){
+  if(document.documentElement.dataset.cartItemNavigationBound) return;
+  document.documentElement.dataset.cartItemNavigationBound = '1';
+  document.addEventListener('click', event => {
+    const card = event.target.closest?.('.premium-cart-item[data-product-url]');
+    if(!card || event.target.closest('a,button,input,textarea,select,label,form')) return;
+    const url = card.dataset.productUrl;
+    if(url) location.href = url;
+  });
+  document.addEventListener('keydown', event => {
+    if(event.key !== 'Enter' && event.key !== ' ') return;
+    const card = event.target.closest?.('.premium-cart-item[data-product-url]');
+    if(!card || event.target.closest('a,button,input,textarea,select,label,form')) return;
+    event.preventDefault();
+    const url = card.dataset.productUrl;
+    if(url) location.href = url;
+  });
+}
+function headerBackFallback(){
+  const page = (location.pathname.split('/').pop() || 'index.html').toLowerCase();
+  if(page === 'product.html'){
+    const category = new URLSearchParams(location.search).get('cat') || '';
+    return `catalog.html${category ? '?cat=' + encodeURIComponent(category) : ''}`;
+  }
+  if(page === 'catalog.html' || page === 'about.html' || page === 'contact.html') return 'index.html';
+  if(page === 'cart.html') return 'catalog.html';
+  return '';
+}
+function goBackFromHeader(){
+  try{
+    if(window.navigation && window.navigation.canGoBack){
+      window.navigation.back();
+      return;
+    }
+    if(history.length > 1){
+      history.back();
+      return;
+    }
+  }catch(e){}
+  const fallback = headerBackFallback();
+  if(fallback) location.assign(fallback);
+  else showSoftToast('You are on the home page');
+}
+function initHeaderBackButtons(){
+  document.querySelectorAll('[data-header-back]').forEach(button => {
+    if(button.dataset.bound) return;
+    button.dataset.bound = '1';
+    button.addEventListener('click', goBackFromHeader);
+  });
+}
+
 function setupCartTriggers(){
   ensureCartDrawer();
-  document.querySelectorAll('a[href="cart.html"], .floating-cart').forEach(el => {
+  document.querySelectorAll('.floating-cart').forEach(el => {
     el.addEventListener('click', event => {
       if(document.body.classList.contains('cart-page')) return;
       event.preventDefault();
@@ -574,8 +647,8 @@ function initMobileMenu(){
     }
   });
 }
-function initCartSystem(){ setupCartTriggers(); initMobileMenu(); refreshCartEverywhere(); }
-window.WelloneCart = { getCart, saveCart, addCartItem, removeCartItem, changeCartQty, clearCart, renderCartItems, openCartDrawer, closeCartDrawer, checkoutWhatsApp, showCheckoutForm, proceedToCheckout, checkCartAvailabilityAndRefresh };
+function initCartSystem(){ setupCartTriggers(); setupCartItemNavigation(); initHeaderBackButtons(); initMobileMenu(); refreshCartEverywhere(); }
+window.WelloneCart = { getCart, saveCart, addCartItem, removeCartItem, changeCartQty, clearCart, renderCartItems, openCartDrawer, closeCartDrawer, checkoutWhatsApp, showCheckoutForm, proceedToCheckout, checkCartAvailabilityAndRefresh, cartProductRelativeLink, goBackFromHeader };
 window.addEventListener('pageshow', refreshCartEverywhere);
 window.addEventListener('storage', refreshCartEverywhere);
 document.addEventListener('visibilitychange', () => { if(!document.hidden) refreshCartEverywhere(); });
