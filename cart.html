@@ -33,19 +33,19 @@
   <main>
     <section class="page-head pattern-card">
       <p class="tag">your cart</p>
-      <h1>Review cart and confirm on WhatsApp.</h1>
+      <h1>Review cart and confirm.</h1>
     </section>
     <section class="section cart-layout">
       <div id="cartItems" class="cart-list"></div>
       <aside class="cart-summary pattern-card">
         <p class="cart-support-top page-support-line">Support: <a href="tel:+919746476813">+919746476813</a></p>
         <h2>Total: ₹<span id="cartTotal">0</span></h2>
-        <div id="pageCartAction" class="cart-action-footer"><button id="pageProceedToOrder" class="btn primary full" type="button">Proceed to order</button></div>
+        <div id="pageCartAction" class="cart-action-footer"><button class="btn primary full" type="button" onclick="proceedToCheckout('page')">Proceed to order</button></div>
         <div id="pageCheckoutForm" class="checkout-form checkout-hidden page-checkout-fields">
           <label>Name<input id="customerName" placeholder="Your name"></label>
           <label>Phone<input id="customerPhone" placeholder="Your phone"></label>
           <label>Address<textarea id="customerAddress" rows="3" placeholder="Delivery address"></textarea></label>
-          <button class="btn primary full whatsapp-checkout" onclick="checkoutWhatsApp()">Place Order</button>
+          <button class="btn primary full whatsapp-checkout" type="button" onclick="checkoutWhatsApp('page')">Place Order</button>
         </div>
         <button class="btn light full" type="button" onclick="clearCart()" style="margin-top:10px">Clear Cart</button>
       </aside>

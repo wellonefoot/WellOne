@@ -207,18 +207,41 @@ function cartItemHtml(item, index){
     </div>
   </article>`;
 }
-function customerField(idBase){
-  return document.getElementById(idBase)?.value?.trim()
-    || document.getElementById('drawer' + idBase[0].toUpperCase() + idBase.slice(1))?.value?.trim()
-    || '';
+function cartCheckoutSource(source = 'auto'){
+  return source === 'page' || source === 'drawer' ? source : 'auto';
 }
-function showCartNotice(text, type = 'warn'){
-  ensureCartDrawer();
-  document.querySelectorAll('.cart-notice').forEach(x => x.remove());
+function customerField(idBase, source = 'auto'){
+  const drawerId = 'drawer' + idBase[0].toUpperCase() + idBase.slice(1);
+  const ids = cartCheckoutSource(source) === 'page'
+    ? [idBase]
+    : cartCheckoutSource(source) === 'drawer'
+      ? [drawerId]
+      : [idBase, drawerId];
+  for(const id of ids){
+    const value = document.getElementById(id)?.value?.trim();
+    if(value) return value;
+  }
+  return '';
+}
+function cartNoticeTarget(source = 'auto'){
+  const context = cartCheckoutSource(source);
+  if(context === 'page') return document.getElementById('cartItems');
+  if(context === 'drawer'){
+    ensureCartDrawer();
+    return document.getElementById('cartDrawerItems');
+  }
+  return document.getElementById('cartDrawerItems') || document.getElementById('cartItems');
+}
+function clearCartNotices(source = 'auto'){
+  const target = cartNoticeTarget(source);
+  target?.parentElement?.querySelectorAll('.cart-notice').forEach(x => x.remove());
+}
+function showCartNotice(text, type = 'warn', source = 'auto'){
+  const target = cartNoticeTarget(source);
+  clearCartNotices(source);
   const notice = document.createElement('div');
   notice.className = `cart-notice ${type}`;
   notice.textContent = text;
-  const target = document.getElementById('cartDrawerItems') || document.getElementById('cartItems');
   target?.parentElement?.insertBefore(notice, target);
 }
 function cartProductAvailable(product){
@@ -325,19 +348,20 @@ async function checkCartAvailabilityAndRefresh(){
   return unavailable;
 }
 
-async function proceedToCheckout(){
+async function proceedToCheckout(source = 'drawer'){
+  const context = cartCheckoutSource(source) === 'page' ? 'page' : 'drawer';
   const cart = getCart();
   if(!cart.length){ showSoftToast('Cart is empty'); return; }
-  showCartNotice('Checking latest availability...', 'info');
+  showCartNotice('Checking latest availability...', 'info', context);
   const unavailable = await checkCartAvailabilityAndRefresh();
   if(unavailable.length){
     const details = unavailable.map(x => `${x.name} (${x.reason})`).join(', ');
-    showOrderProblem('Some selected items need support', details);
+    showOrderProblem('Some selected items need support', details, context);
     showSoftToast('Item unavailable');
     return;
   }
-  document.querySelectorAll('.cart-notice').forEach(x => x.remove());
-  showCheckoutForm(true);
+  clearCartNotices(context);
+  showCheckoutForm(context, true);
 }
 
 function shopPhonePretty(){
@@ -359,9 +383,9 @@ function orderRef(){
   const stamp = date.toISOString().slice(0,10).replace(/-/g,'') + '-' + String(date.getHours()).padStart(2,'0') + String(date.getMinutes()).padStart(2,'0');
   return `WEL-${stamp}-${Math.floor(1000 + Math.random()*9000)}`;
 }
-function showOrderProblem(title, details){
+function showOrderProblem(title, details, source = 'auto'){
   const phone = shopPhonePretty();
-  showCartNotice(`${title}. ${details || ''} Contact ${phone} for support and latest availability.`, 'warn');
+  showCartNotice(`${title}. ${details || ''} Contact ${phone} for support and latest availability.`, 'warn', source);
 }
 
 function orderMessage(customerName, customerPhone, customerAddress){
@@ -394,33 +418,37 @@ function orderMessage(customerName, customerPhone, customerAddress){
   message += `\n*Grand Total: ${cartFormatMoney(total)}*\n\nPlease confirm item availability and delivery details.`;
   return message;
 }
-async function confirmOrderToWhatsApp(){
+async function confirmOrderToWhatsApp(source = 'auto'){
+  const context = cartCheckoutSource(source);
   const cart = getCart();
   if(!cart.length){ showSoftToast('Cart is empty'); return; }
-  const customerName = customerField('customerName');
-  const customerPhone = customerField('customerPhone');
-  const customerAddress = customerField('customerAddress');
+  const customerName = customerField('customerName', context);
+  const customerPhone = customerField('customerPhone', context);
+  const customerAddress = customerField('customerAddress', context);
   if(!customerName || !customerPhone || !customerAddress){
-    showCheckoutForm(true);
+    showCheckoutForm(context, true);
     showSoftToast('Add name, phone and address');
-    const target = document.getElementById('drawerCustomerName') || document.getElementById('customerName');
+    const target = context === 'page'
+      ? document.getElementById('customerName')
+      : document.getElementById('drawerCustomerName') || document.getElementById('customerName');
     target?.focus();
     return;
   }
-  showCartNotice('Checking latest availability...', 'info');
+  showCartNotice('Checking latest availability...', 'info', context);
   const unavailable = await checkCartAvailabilityAndRefresh();
   if(unavailable.length){
     const details = unavailable.map(x => `${x.name} (${x.reason})`).join(', ');
-    showOrderProblem('Some selected items need support', details);
+    showOrderProblem('Some selected items need support', details, context);
     showSoftToast('Item unavailable');
     return;
   }
-  document.querySelectorAll('.cart-notice').forEach(x => x.remove());
-  window.open(`https://wa.me/${SITE_CONFIG.whatsappNumber}?text=${encodeURIComponent(orderMessage(customerName, customerPhone, customerAddress))}`, '_blank');
+  clearCartNotices(context);
+  const whatsappUrl = `https://wa.me/${SITE_CONFIG.whatsappNumber}?text=${encodeURIComponent(orderMessage(customerName, customerPhone, customerAddress))}`;
+  window.location.assign(whatsappUrl);
 }
-function checkoutWhatsApp(){ confirmOrderToWhatsApp(); }
-function placeOrder(){ openCartDrawer(false); proceedToCheckout(); }
-function openOrderModal(){ openCartDrawer(false); proceedToCheckout(); }
+function checkoutWhatsApp(source = 'auto'){ confirmOrderToWhatsApp(source); }
+function placeOrder(){ openCartDrawer(false); proceedToCheckout('drawer'); }
+function openOrderModal(){ openCartDrawer(false); proceedToCheckout('drawer'); }
 function closeOrderModal(){ closeCartDrawer(); }
 function showSoftToast(text){
   let toast = document.getElementById('toast');
@@ -436,8 +464,8 @@ function ensureCartDrawer(){
     <div class="cart-head"><div><p class="tag">shopping cart</p><h2>Your cart</h2><p class="cart-support-top">Support: <a href="${shopPhoneHref()}">${shopPhonePretty()}</a></p></div><button class="cart-close" type="button" onclick="closeCartDrawer()" aria-label="Close cart"><span>×</span></button></div>
     <div class="cart-drawer-total"><span><b data-cart-count>0</b> item(s)</span><strong data-cart-total>₹0</strong></div>
     <div id="cartDrawerItems" class="cart-items"></div>
-    <div id="cartDrawerAction" class="cart-action-footer"><button class="btn primary full" type="button" onclick="proceedToCheckout()">Proceed to order</button></div>
-    <form id="drawerCheckoutForm" class="checkout-form checkout-hidden" onsubmit="event.preventDefault(); confirmOrderToWhatsApp();">
+    <div id="cartDrawerAction" class="cart-action-footer"><button class="btn primary full" type="button" onclick="proceedToCheckout('drawer')">Proceed to order</button></div>
+    <form id="drawerCheckoutForm" class="checkout-form checkout-hidden" onsubmit="event.preventDefault(); confirmOrderToWhatsApp('drawer');">
       <label>Name<input id="drawerCustomerName" autocomplete="name" placeholder="Your name"></label>
       <label>Phone<input id="drawerCustomerPhone" autocomplete="tel" inputmode="tel" placeholder="Your phone"></label>
       <label>Address<textarea id="drawerCustomerAddress" rows="2" placeholder="Delivery address"></textarea></label>
@@ -445,44 +473,47 @@ function ensureCartDrawer(){
     </form>
   </aside>`);
 }
-function showCheckoutForm(focus = false){
-  const form = document.getElementById('drawerCheckoutForm') || document.getElementById('pageCheckoutForm');
-  const action = document.getElementById('cartDrawerAction') || document.getElementById('pageCartAction');
+function showCheckoutForm(source = 'auto', focus = false){
+  if(typeof source === 'boolean'){
+    focus = source;
+    source = 'auto';
+  }
+  const context = cartCheckoutSource(source);
+  const form = context === 'page'
+    ? document.getElementById('pageCheckoutForm')
+    : context === 'drawer'
+      ? document.getElementById('drawerCheckoutForm')
+      : document.getElementById('drawerCheckoutForm') || document.getElementById('pageCheckoutForm');
+  const action = context === 'page'
+    ? document.getElementById('pageCartAction')
+    : context === 'drawer'
+      ? document.getElementById('cartDrawerAction')
+      : document.getElementById('cartDrawerAction') || document.getElementById('pageCartAction');
   form?.classList.remove('checkout-hidden');
   action?.classList.add('hide');
-  if(focus) setTimeout(() => (document.getElementById('drawerCustomerName') || document.getElementById('customerName'))?.focus(), 80);
+  if(focus){
+    const input = context === 'page'
+      ? document.getElementById('customerName')
+      : document.getElementById('drawerCustomerName') || document.getElementById('customerName');
+    setTimeout(() => input?.focus(), 80);
+  }
+}
+function resetDrawerCheckoutState(){
+  document.getElementById('drawerCheckoutForm')?.classList.add('checkout-hidden');
+  const action = document.getElementById('cartDrawerAction');
+  action?.classList.toggle('hide', !getCart().length);
+  clearCartNotices('drawer');
 }
 function openCartDrawer(focusForm = false){
   ensureCartDrawer();
+  if(!focusForm) resetDrawerCheckoutState();
   renderCartItems();
   document.getElementById('cartOverlay')?.classList.add('open');
   const drawer = document.getElementById('cartDrawer');
   drawer?.classList.add('open');
   drawer?.setAttribute('aria-hidden','false');
   document.body.classList.add('cart-open');
-  if(focusForm) proceedToCheckout();
-}
-function openPageCartCheckout(event){
-  if(event){
-    event.preventDefault();
-    event.stopPropagation();
-  }
-  const cart = getCart();
-  if(!cart.length){
-    showSoftToast('Cart is empty');
-    return false;
-  }
-
-  // The cart-page Proceed button must open the existing floating cart first.
-  openCartDrawer(false);
-
-  // Reveal the checkout fields inside the now-visible floating cart immediately.
-  const drawerForm = document.getElementById('drawerCheckoutForm');
-  const drawerAction = document.getElementById('cartDrawerAction');
-  drawerForm?.classList.remove('checkout-hidden');
-  drawerAction?.classList.add('hide');
-  setTimeout(() => document.getElementById('drawerCustomerName')?.focus(), 80);
-  return false;
+  if(focusForm) proceedToCheckout('drawer');
 }
 function closeCartDrawer(){
   document.getElementById('cartOverlay')?.classList.remove('open');
@@ -507,13 +538,6 @@ function renderCartItems(){
 
 function setupCartTriggers(){
   ensureCartDrawer();
-
-  const pageProceedButton = document.getElementById('pageProceedToOrder');
-  if(pageProceedButton && !pageProceedButton.dataset.cartProceedBound){
-    pageProceedButton.dataset.cartProceedBound = '1';
-    pageProceedButton.addEventListener('click', openPageCartCheckout);
-  }
-
   document.querySelectorAll('a[href="cart.html"], .floating-cart').forEach(el => {
     el.addEventListener('click', event => {
       if(document.body.classList.contains('cart-page')) return;
