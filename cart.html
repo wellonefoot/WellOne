@@ -40,7 +40,7 @@
       <aside class="cart-summary pattern-card">
         <p class="cart-support-top page-support-line">Support: <a href="tel:+919746476813">+919746476813</a></p>
         <h2>Total: ₹<span id="cartTotal">0</span></h2>
-        <div id="pageCartAction" class="cart-action-footer"><button class="btn primary full" type="button" onclick="openCartDrawer(false); showCheckoutForm(true)">Proceed to order</button></div>
+        <div id="pageCartAction" class="cart-action-footer"><button id="pageProceedToOrder" class="btn primary full" type="button">Proceed to order</button></div>
         <div id="pageCheckoutForm" class="checkout-form checkout-hidden page-checkout-fields">
           <label>Name<input id="customerName" placeholder="Your name"></label>
           <label>Phone<input id="customerPhone" placeholder="Your phone"></label>
@@ -54,7 +54,7 @@
   <footer>© 2026 Wellone Fancy & Footwear.</footer>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="js/config.js?v=50"></script>
-  <script src="js/cart.js?v=51"></script>
+  <script src="js/cart.js?v=52"></script>
   <script src="js/supabase-data.js?v=51"></script>
   <script src="js/app.js?v=51"></script>
   <script>initCartPage();</script>
