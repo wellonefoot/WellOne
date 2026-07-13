@@ -436,7 +436,7 @@ function ensureCartDrawer(){
     <div class="cart-head"><div><p class="tag">shopping cart</p><h2>Your cart</h2><p class="cart-support-top">Support: <a href="${shopPhoneHref()}">${shopPhonePretty()}</a></p></div><button class="cart-close" type="button" onclick="closeCartDrawer()" aria-label="Close cart"><span>×</span></button></div>
     <div class="cart-drawer-total"><span><b data-cart-count>0</b> item(s)</span><strong data-cart-total>₹0</strong></div>
     <div id="cartDrawerItems" class="cart-items"></div>
-    <div id="cartDrawerAction" class="cart-action-footer"><button id="drawerProceedToOrder" class="btn primary full" type="button">Proceed to order</button></div>
+    <div id="cartDrawerAction" class="cart-action-footer"><button class="btn primary full" type="button" onclick="proceedToCheckout()">Proceed to order</button></div>
     <form id="drawerCheckoutForm" class="checkout-form checkout-hidden" onsubmit="event.preventDefault(); confirmOrderToWhatsApp();">
       <label>Name<input id="drawerCustomerName" autocomplete="name" placeholder="Your name"></label>
       <label>Phone<input id="drawerCustomerPhone" autocomplete="tel" inputmode="tel" placeholder="Your phone"></label>
@@ -462,6 +462,28 @@ function openCartDrawer(focusForm = false){
   document.body.classList.add('cart-open');
   if(focusForm) proceedToCheckout();
 }
+function openPageCartCheckout(event){
+  if(event){
+    event.preventDefault();
+    event.stopPropagation();
+  }
+  const cart = getCart();
+  if(!cart.length){
+    showSoftToast('Cart is empty');
+    return false;
+  }
+
+  // The cart-page Proceed button must open the existing floating cart first.
+  openCartDrawer(false);
+
+  // Reveal the checkout fields inside the now-visible floating cart immediately.
+  const drawerForm = document.getElementById('drawerCheckoutForm');
+  const drawerAction = document.getElementById('cartDrawerAction');
+  drawerForm?.classList.remove('checkout-hidden');
+  drawerAction?.classList.add('hide');
+  setTimeout(() => document.getElementById('drawerCustomerName')?.focus(), 80);
+  return false;
+}
 function closeCartDrawer(){
   document.getElementById('cartOverlay')?.classList.remove('open');
   const drawer = document.getElementById('cartDrawer');
@@ -483,43 +505,15 @@ function renderCartItems(){
   document.querySelectorAll('#drawerCheckoutForm,#pageCheckoutForm').forEach(el => el.classList.toggle('checkout-hidden', !cart.length || el.classList.contains('checkout-hidden')));
 }
 
-function openFloatingCartCheckout(event){
-  event?.preventDefault();
-  const cart = getCart();
-  if(!cart.length){ showSoftToast('Cart is empty'); return; }
-
-  ensureCartDrawer();
-  renderCartItems();
-
-  const overlay = document.getElementById('cartOverlay');
-  const drawer = document.getElementById('cartDrawer');
-  const form = document.getElementById('drawerCheckoutForm');
-  const action = document.getElementById('cartDrawerAction');
-
-  overlay?.classList.add('open');
-  drawer?.classList.add('open');
-  drawer?.setAttribute('aria-hidden', 'false');
-  document.body.classList.add('cart-open');
-  form?.classList.remove('checkout-hidden');
-  action?.classList.add('hide');
-
-  window.requestAnimationFrame(() => {
-    form?.scrollIntoView({block:'end', behavior:'smooth'});
-    document.getElementById('drawerCustomerName')?.focus({preventScroll:true});
-  });
-}
-
-function bindProceedToOrderButtons(){
-  document.querySelectorAll('#pageProceedToOrder, #drawerProceedToOrder').forEach(button => {
-    if(button.dataset.cartProceedBound === '1') return;
-    button.dataset.cartProceedBound = '1';
-    button.addEventListener('click', openFloatingCartCheckout);
-  });
-}
-
 function setupCartTriggers(){
   ensureCartDrawer();
-  bindProceedToOrderButtons();
+
+  const pageProceedButton = document.getElementById('pageProceedToOrder');
+  if(pageProceedButton && !pageProceedButton.dataset.cartProceedBound){
+    pageProceedButton.dataset.cartProceedBound = '1';
+    pageProceedButton.addEventListener('click', openPageCartCheckout);
+  }
+
   document.querySelectorAll('a[href="cart.html"], .floating-cart').forEach(el => {
     el.addEventListener('click', event => {
       if(document.body.classList.contains('cart-page')) return;
@@ -557,7 +551,7 @@ function initMobileMenu(){
   });
 }
 function initCartSystem(){ setupCartTriggers(); initMobileMenu(); refreshCartEverywhere(); }
-window.WelloneCart = { getCart, saveCart, addCartItem, removeCartItem, changeCartQty, clearCart, renderCartItems, openCartDrawer, closeCartDrawer, openFloatingCartCheckout, checkoutWhatsApp, showCheckoutForm, proceedToCheckout, checkCartAvailabilityAndRefresh };
+window.WelloneCart = { getCart, saveCart, addCartItem, removeCartItem, changeCartQty, clearCart, renderCartItems, openCartDrawer, closeCartDrawer, checkoutWhatsApp, showCheckoutForm, proceedToCheckout, checkCartAvailabilityAndRefresh };
 window.addEventListener('pageshow', refreshCartEverywhere);
 window.addEventListener('storage', refreshCartEverywhere);
 document.addEventListener('visibilitychange', () => { if(!document.hidden) refreshCartEverywhere(); });
