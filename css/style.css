@@ -2420,3 +2420,208 @@ html.product-image-viewer-open,html.product-image-viewer-open body{overflow:hidd
     height:20px!important;
   }
 }
+
+
+/* v57 requested layout: seamless installed-app chrome, fixed benefit grid and automatic catalog loading */
+html{
+  min-height:100%;
+  background:#fff;
+}
+body{
+  min-height:100%;
+  -webkit-tap-highlight-color:transparent;
+}
+@media (display-mode: fullscreen), (display-mode: standalone){
+  html,body{min-height:100dvh;}
+  .header.site-header{
+    top:0!important;
+    margin-top:0!important;
+  }
+}
+
+/* Keep the product-page text back link removed; header back remains mobile-only. */
+.detail-back-link{display:none!important;}
+
+/* Benefits are a stable grid, never a horizontal slider. */
+.service-strip{
+  display:grid!important;
+  grid-template-columns:repeat(4,minmax(0,1fr))!important;
+  gap:10px!important;
+  overflow:visible!important;
+  scroll-snap-type:none!important;
+  padding:12px!important;
+  margin:18px 0 14px!important;
+  border:1px solid rgba(111,143,13,.13)!important;
+  border-radius:22px!important;
+  background:rgba(255,255,255,.96)!important;
+  box-shadow:0 12px 34px rgba(45,64,22,.07)!important;
+}
+.service-strip article{
+  width:auto!important;
+  min-width:0!important;
+  min-height:72px!important;
+  display:flex!important;
+  align-items:center!important;
+  gap:10px!important;
+  padding:11px 12px!important;
+  border:1px solid rgba(111,143,13,.09)!important;
+  border-radius:16px!important;
+  background:linear-gradient(145deg,#fff,#fbfef5)!important;
+  box-shadow:0 6px 18px rgba(55,75,28,.045)!important;
+  scroll-snap-align:none!important;
+}
+.service-strip article:nth-child(n){border-right:1px solid rgba(111,143,13,.09)!important;border-bottom:1px solid rgba(111,143,13,.09)!important;}
+.service-strip .service-icon{
+  width:40px!important;
+  height:40px!important;
+  flex:0 0 40px!important;
+  border-radius:13px!important;
+  background:#f1f8df!important;
+}
+.service-strip b{font-size:12.5px!important;line-height:1.2!important;}
+.service-strip small{
+  font-size:10.5px!important;
+  line-height:1.3!important;
+  white-space:normal!important;
+  overflow:visible!important;
+  text-overflow:clip!important;
+}
+@media (max-width:1040px){
+  .service-strip{
+    grid-template-columns:repeat(2,minmax(0,1fr))!important;
+    gap:9px!important;
+    padding:10px!important;
+  }
+}
+@media (max-width:520px){
+  .service-strip{gap:8px!important;padding:8px!important;border-radius:18px!important;}
+  .service-strip article{min-height:70px!important;padding:9px!important;border-radius:14px!important;gap:8px!important;}
+  .service-strip .service-icon{width:36px!important;height:36px!important;flex-basis:36px!important;border-radius:12px!important;}
+  .service-strip .service-icon svg{width:19px!important;height:19px!important;}
+  .service-strip b{font-size:11.5px!important;}
+  .service-strip small{font-size:9.5px!important;}
+}
+
+/* Automatic catalog continuation: no manual Load more button. */
+.catalog-infinite-sentinel{
+  width:100%;
+  height:1px;
+  pointer-events:none;
+}
+.catalog-infinite-sentinel:not(.is-active){display:none;}
+.catalog-scroll-loader{
+  min-height:54px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:7px;
+  margin:10px auto 0;
+  color:#6a735f;
+  font-size:12px;
+  font-weight:800;
+}
+.catalog-scroll-loader.hidden{display:none!important;}
+.catalog-scroll-loader span{
+  width:7px;
+  height:7px;
+  border-radius:999px;
+  background:#7dad09;
+  animation:catalogLoadPulse .9s ease-in-out infinite alternate;
+}
+.catalog-scroll-loader span:nth-child(2){animation-delay:.14s;}
+.catalog-scroll-loader span:nth-child(3){animation-delay:.28s;}
+.catalog-scroll-loader b{margin-left:3px;font-size:12px;}
+@keyframes catalogLoadPulse{from{opacity:.28;transform:translateY(2px)}to{opacity:1;transform:translateY(-2px)}}
+@media (prefers-reduced-motion:reduce){.catalog-scroll-loader span{animation:none;opacity:.75;}}
+
+/* v59 requested benefits cleanup: simple layout with no double card backgrounds */
+.service-strip{
+  grid-template-columns:repeat(4,minmax(0,1fr))!important;
+  gap:0!important;
+  margin:18px 0 14px!important;
+  padding:0!important;
+  border:0!important;
+  border-radius:0!important;
+  background:transparent!important;
+  box-shadow:none!important;
+}
+.service-strip article{
+  min-height:58px!important;
+  gap:10px!important;
+  padding:10px 16px!important;
+  border:0!important;
+  border-right:1px solid rgba(43,61,27,.11)!important;
+  border-radius:0!important;
+  background:transparent!important;
+  box-shadow:none!important;
+}
+.service-strip article:last-child{
+  border-right:0!important;
+}
+.service-strip article:nth-child(n){
+  border-bottom:0!important;
+}
+.service-strip .service-icon{
+  width:30px!important;
+  height:30px!important;
+  flex:0 0 30px!important;
+  border-radius:0!important;
+  background:transparent!important;
+  color:#6fa800!important;
+}
+.service-strip .service-icon svg{
+  width:22px!important;
+  height:22px!important;
+  stroke-width:1.8!important;
+}
+.service-strip b{
+  font-size:12.5px!important;
+  line-height:1.2!important;
+}
+.service-strip small{
+  font-size:10.5px!important;
+  line-height:1.35!important;
+}
+@media (max-width:1040px){
+  .service-strip{
+    grid-template-columns:repeat(2,minmax(0,1fr))!important;
+    gap:0!important;
+    padding:0!important;
+  }
+  .service-strip article{
+    min-height:62px!important;
+    padding:12px 14px!important;
+    border-right:1px solid rgba(43,61,27,.11)!important;
+    border-bottom:1px solid rgba(43,61,27,.11)!important;
+  }
+  .service-strip article:nth-child(even){
+    border-right:0!important;
+  }
+  .service-strip article:nth-last-child(-n+2){
+    border-bottom:0!important;
+  }
+}
+@media (max-width:520px){
+  .service-strip{
+    gap:0!important;
+    padding:0!important;
+    border-radius:0!important;
+  }
+  .service-strip article{
+    min-height:60px!important;
+    padding:11px 9px!important;
+    border-radius:0!important;
+    gap:8px!important;
+  }
+  .service-strip .service-icon{
+    width:27px!important;
+    height:27px!important;
+    flex-basis:27px!important;
+  }
+  .service-strip .service-icon svg{
+    width:20px!important;
+    height:20px!important;
+  }
+  .service-strip b{font-size:11.5px!important;}
+  .service-strip small{font-size:9.5px!important;}
+}

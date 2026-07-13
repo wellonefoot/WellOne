@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
   <link rel="preconnect" href="https://wnavzhrkwgnegjdetdno.supabase.co" crossorigin>
   <link rel="dns-prefetch" href="//cdn.jsdelivr.net">
@@ -26,14 +26,14 @@
   <link rel="sitemap" type="application/xml" href="https://wellone.in/sitemap.xml">
   <!-- /SEO v54 -->
   
-  <link rel="stylesheet" href="css/style.css?v=55">
+  <link rel="stylesheet" href="css/style.css?v=58">
   <link rel="icon" href="./assets/favicon/favicon.ico" type="image/x-icon">
   <link rel="apple-touch-icon" href="./assets/favicon/apple-icon-180x180.png">
   <link rel="manifest" href="manifest.webmanifest">
-  <meta name="theme-color" content="#6f8f0d">
+  <meta name="theme-color" content="#ffffff">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="Wellone">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
 </head>
 <body class="catalog-page">
   <header class="header site-header">
@@ -72,7 +72,8 @@
     <section class="section hidden" id="productsSection">
       <div id="categoryHero" class="category-hero-card pattern-card hidden"></div>
       <div id="productGrid" class="product-grid skeleton-grid"></div>
-      <button id="loadMoreBtn" class="load-more hidden" type="button">Load more</button>
+      <div id="catalogInfiniteSentinel" class="catalog-infinite-sentinel" aria-hidden="true"></div>
+      <div id="catalogScrollLoader" class="catalog-scroll-loader hidden" role="status" aria-live="polite"><span></span><span></span><span></span><b>Loading more products</b></div>
     </section>
   </main>
   <a class="floating-cart" href="cart.html" aria-label="Open cart">Cart <b id="floatCartCount">0</b></a>
@@ -81,8 +82,8 @@
   <script src="js/config.js?v=50"></script>
   <script src="js/cart.js?v=56"></script>
   <script src="js/supabase-data.js?v=50"></script>
-  <script src="js/app.js?v=54"></script>
+  <script src="js/app.js?v=57"></script>
   <script>initCatalog();</script>
-  <script src="js/pwa-install.js?v=54"></script>
+  <script src="js/pwa-install.js?v=57"></script>
 </body>
 </html>

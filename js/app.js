@@ -1,6 +1,7 @@
 'use strict';
 
-const PAGE_LIMIT = 20;
+const INITIAL_PAGE_LIMIT = 10;
+const INFINITE_PAGE_LIMIT = 2;
 const SORT_OPTIONS = [
   {value:'newest', label:'Newest'},
   {value:'price_asc', label:'Price: Low to High'},
@@ -16,6 +17,7 @@ let activeColorIndex = 0;
 let activeImageIndex = 0;
 const CATALOG_VIEW_TTL_MS = 30 * 60 * 1000;
 let catalogScrollTimer = null;
+let catalogInfiniteObserver = null;
 const WELLONE_PUBLIC_ORIGIN = 'https://wellone.in';
 
 function absoluteWelloneUrl(relative = ''){
@@ -132,9 +134,8 @@ function restoreCatalogView(){
   rememberProducts(catalogState.products);
   grid.classList.remove('skeleton-grid');
   grid.innerHTML = catalogState.products.map(p => productCard(p, p.Category || catalogState.category)).join('');
-  const more = document.getElementById('loadMoreBtn');
-  if(more) more.classList.toggle('hidden', !catalogState.nextOffset);
   renderCategoryHero();
+  updateCatalogInfiniteState();
   requestAnimationFrame(() => setTimeout(() => window.scrollTo({top: cached.scrollY || 0, behavior:'auto'}), 40));
   return true;
 }
@@ -428,6 +429,29 @@ async function initHome(){
   categories.slice(0,8).forEach(c => preloadImage(c.image));
   offers.slice(0,4).forEach(o => preloadImage(o.image));
 }
+function setCatalogScrollLoading(isLoading){
+  const loader = document.getElementById('catalogScrollLoader');
+  if(loader) loader.classList.toggle('hidden', !isLoading);
+}
+function updateCatalogInfiniteState(){
+  const sentinel = document.getElementById('catalogInfiniteSentinel');
+  if(!sentinel) return;
+  const hasMore = Boolean(catalogState.nextOffset);
+  sentinel.classList.toggle('is-active', hasMore);
+  sentinel.setAttribute('aria-hidden', hasMore ? 'false' : 'true');
+  if(!hasMore) setCatalogScrollLoading(false);
+}
+function initCatalogInfiniteScroll(){
+  const sentinel = document.getElementById('catalogInfiniteSentinel');
+  if(!sentinel || catalogInfiniteObserver) return;
+  catalogInfiniteObserver = new IntersectionObserver(entries => {
+    if(!entries.some(entry => entry.isIntersecting)) return;
+    if(catalogState.loading || !catalogState.nextOffset) return;
+    loadCatalogProducts(false);
+  }, {root:null, rootMargin:'700px 0px 700px 0px', threshold:0});
+  catalogInfiniteObserver.observe(sentinel);
+  updateCatalogInfiniteState();
+}
 async function initCatalog(){
   updateCartCount();
   const params = new URLSearchParams(location.search);
@@ -441,6 +465,7 @@ async function initCatalog(){
   if(searchInput) searchInput.value = catalogState.query;
   updateSortButton();
   initCatalogEvents();
+  initCatalogInfiniteScroll();
   bindCatalogViewPersistence();
 
   const categories = await loadCategories(true);
@@ -467,15 +492,13 @@ async function initCatalog(){
     hideFiltersForGlobalSearch();
   }
   const restored = restoreCatalogView();
-  if(restored) setTimeout(() => loadCatalogProducts(true), 160);
-  else await loadCatalogProducts(true);
+  if(!restored) await loadCatalogProducts(true);
 }
 function initCatalogEvents(){
   const form = document.getElementById('catalogSearchForm');
   const input = document.getElementById('catalogSearchInput');
   const sortBtn = document.getElementById('sortButton');
   const filterToggle = document.getElementById('filterToggle');
-  const more = document.getElementById('loadMoreBtn');
   if(form && input) form.addEventListener('submit', event => {
     event.preventDefault();
     const q = input.value.trim();
@@ -496,7 +519,6 @@ function initCatalogEvents(){
   });
   if(sortBtn) sortBtn.addEventListener('click', openSortSheet);
   if(filterToggle) filterToggle.addEventListener('click', () => document.getElementById('filterChips')?.classList.toggle('hidden'));
-  if(more) more.addEventListener('click', () => loadCatalogProducts(false));
 }
 function updateCatalogUrl(){
   const params = new URLSearchParams();
@@ -544,18 +566,19 @@ async function loadCatalogProducts(reset){
   if(catalogState.loading) return;
   catalogState.loading = true;
   const grid = document.getElementById('productGrid');
-  const more = document.getElementById('loadMoreBtn');
   if(reset){
     catalogState.offset = 0;
     catalogState.products = [];
     if(grid) grid.innerHTML = skeletonCards(6, 'skeleton-product');
   }
-  if(more) more.classList.add('hidden');
-  const options = {offset: catalogState.offset, limit: PAGE_LIMIT, query: catalogState.query, subcategory: catalogState.subcategory, sort: catalogState.sort, forceRefresh: true};
+  setCatalogScrollLoading(!reset);
+  const pageLimit = reset ? INITIAL_PAGE_LIMIT : INFINITE_PAGE_LIMIT;
+  const options = {offset: catalogState.offset, limit: pageLimit, query: catalogState.query, subcategory: catalogState.subcategory, sort: catalogState.sort, forceRefresh: true};
   const pack = catalogState.global
     ? await searchGlobalProducts(catalogState.query, options).catch(() => ({products:[], nextOffset:null, total:0}))
     : await loadCategoryPage(catalogState.category, options).catch(() => ({products:[], nextOffset:null, total:0}));
   catalogState.loading = false;
+  setCatalogScrollLoading(false);
   const newProducts = pack.products || [];
   catalogState.nextOffset = pack.nextOffset;
   catalogState.offset = pack.nextOffset || 0;
@@ -570,7 +593,7 @@ async function loadCatalogProducts(reset){
     grid.insertAdjacentHTML('beforeend', newProducts.map(p => productCard(p, p.Category || catalogState.category)).join(''));
   }
   requestAnimationFrame(() => newProducts.slice(0,4).forEach(p => preloadImage(firstImage((p.Variants && p.Variants[0] && p.Variants[0].images) || p.Images, p.Image))));
-  if(more) more.classList.toggle('hidden', !catalogState.nextOffset);
+  updateCatalogInfiniteState();
   renderCategoryHero();
   persistCatalogView();
 }
@@ -915,7 +938,7 @@ function renderProductDetail(){
       ${terms.length ? `<section class="product-policy-section" aria-label="Product policies"><p class="product-policy-title">Product policies</p><div class="terms-grid compact-terms stylish-terms">${terms.map(term => `<article><span class="term-icon">${policyIconSvg(term.key)}</span><span class="term-copy"><b>${escapeHtml(term.label)}</b><small>${escapeHtml(term.description)}</small></span></article>`).join('')}</div></section>` : ''}
       ${productStockNote(product, variant)}
       <button class="btn primary full add-cart-button" ${productIsAvailable(product, variant) ? 'onclick="handleAddToCart()"' : 'disabled'}>${productIsAvailable(product, variant) ? 'Add to Cart' : 'Out of stock'}</button>
-      <div class="detail-mini-actions"><button class="share-product-btn" type="button" onclick="shareProductLink()">Share selected option</button><a class="detail-back-link" href="catalog.html">← Back to catalog</a></div>
+      <div class="detail-mini-actions"><button class="share-product-btn" type="button" onclick="shareProductLink()">Share selected option</button></div>
     </div>`;
   syncProductSelectionUrl(product);
   updateProductSeo(product, variant, images);

@@ -7,11 +7,11 @@
   "scope": "./",
   "display": "standalone",
   "display_override": [
-    "standalone",
-    "minimal-ui"
+    "fullscreen",
+    "standalone"
   ],
-  "background_color": "#f7faef",
-  "theme_color": "#6f8f0d",
+  "background_color": "#ffffff",
+  "theme_color": "#ffffff",
   "orientation": "portrait-primary",
   "categories": [
     "shopping",
