@@ -10,7 +10,7 @@
   let deferredPrompt = null;
 
   if('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')){
-    window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js?v=57', {updateViaCache:'none'}).catch(() => {}), {once:true});
+    window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js?v=61', {updateViaCache:'none'}).catch(() => {}), {once:true});
   }
 
   function closeLaunchSplash(){

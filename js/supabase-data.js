@@ -261,7 +261,7 @@ function findProductInCachedPages(categoryName, productId){
 
 async function loadCategories(forceRefresh = false){
   if(!forceRefresh && categoryCache) return categoryCache;
-  const cached = !forceRefresh && readFastCache('categories');
+  const cached = !forceRefresh && (readFastCache('categories') || readAnyCache('categories'));
   if(cached){ categoryCache = cached; refreshCategoriesInBackground(); return cached; }
   const base = await supabaseClient()
     .from('categories')
@@ -303,7 +303,7 @@ async function loadTerms(forceRefresh = false){
 function refreshTermsInBackground(){ if(!canRefresh('terms')) return; loadTerms(true).catch(()=>{}); }
 async function loadOffers(forceRefresh = false){
   if(!forceRefresh && offersCache) return offersCache;
-  const cached = !forceRefresh && readFastCache('offers');
+  const cached = !forceRefresh && (readFastCache('offers') || readAnyCache('offers'));
   if(cached){ offersCache = cached; refreshOffersInBackground(); return cached; }
   const {data, error} = await supabaseClient().from('offer_slides').select('id,title,subtitle,image_url,mrp,price,quantity,link,product_id,is_active,sort_order').eq('is_active', true).order('sort_order', {ascending:true}).order('created_at', {ascending:false});
   if(error) throw error;
@@ -335,30 +335,57 @@ function applySort(query, sort){
   return query.order('created_at', {ascending:false});
 }
 function safeLike(q){ return String(q || '').replace(/[%_]/g, m => '\\' + m).replace(/[,()]/g, ' '); }
+function searchTerms(q){
+  const phrase = cleanText(q).replace(/\s+/g, ' ');
+  if(!phrase) return [];
+  const words = phrase.split(' ').map(value => value.trim()).filter(value => value.length >= 2);
+  return uniqueClean([phrase, ...words]).slice(0, 8);
+}
 function numericSearchValue(q){
   const n = Number(String(q || '').replace(/[^0-9.]/g,''));
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 async function searchMatchIds(q, categoryId){
-  const text = cleanText(q).toLowerCase();
-  if(!text) return {categoryIds:[], subcategoryIds:[]};
-  const [catRes, subRes] = await Promise.all([
+  const terms = searchTerms(q).map(value => value.toLowerCase());
+  if(!terms.length) return {categoryIds:[], subcategoryIds:[], productIds:[]};
+  const variantOr = terms.flatMap(term => {
+    const safe = safeLike(term);
+    return [`label.ilike.%${safe}%`, `unit.ilike.%${safe}%`];
+  }).join(',');
+  const variantQuery = supabaseClient()
+    .from('product_variants')
+    .select('product_id,label,unit')
+    .or(variantOr)
+    .limit(60);
+  const [catRes, subRes, variantRes] = await Promise.all([
     supabaseClient().from('categories').select('id,name').eq('is_active', true),
     categoryId
       ? supabaseClient().from('subcategories').select('id,name,category_id').eq('is_active', true).eq('category_id', categoryId)
-      : supabaseClient().from('subcategories').select('id,name,category_id').eq('is_active', true)
+      : supabaseClient().from('subcategories').select('id,name,category_id').eq('is_active', true),
+    variantQuery
   ]);
-  const categoryIds = (catRes.data || []).filter(c => cleanText(c.name).toLowerCase().includes(text)).map(c => c.id);
-  const subcategoryIds = (subRes.data || []).filter(s => cleanText(s.name).toLowerCase().includes(text)).map(s => s.id);
-  return {categoryIds, subcategoryIds};
+  const matchesAny = value => {
+    const text = cleanText(value).toLowerCase();
+    return terms.some(term => text.includes(term));
+  };
+  const categoryIds = uniqueClean((catRes.data || []).filter(c => matchesAny(c.name)).map(c => c.id));
+  const subcategoryIds = uniqueClean((subRes.data || []).filter(s => matchesAny(s.name)).map(s => s.id));
+  const productIds = uniqueClean((variantRes.data || []).map(v => v.product_id)).slice(0, 60);
+  return {categoryIds, subcategoryIds, productIds};
 }
 function searchOrParts(q, ids = {}){
-  const term = safeLike(q);
-  const parts = [`name.ilike.%${term}%`, `description.ilike.%${term}%`];
+  const terms = searchTerms(q);
+  const fields = ['name','slug','description','sizes','colors','option_title'];
+  const parts = [];
+  terms.forEach(value => {
+    const term = safeLike(value);
+    fields.forEach(field => parts.push(`${field}.ilike.%${term}%`));
+  });
   const num = numericSearchValue(q);
   if(num){ parts.push(`price.eq.${num}`, `mrp.eq.${num}`); }
   if(ids.categoryIds && ids.categoryIds.length){ parts.push(`category_id.in.(${ids.categoryIds.join(',')})`); }
   if(ids.subcategoryIds && ids.subcategoryIds.length){ parts.push(`subcategory_id.in.(${ids.subcategoryIds.join(',')})`); }
+  if(ids.productIds && ids.productIds.length){ parts.push(`id.in.(${ids.productIds.join(',')})`); }
   return parts.join(',');
 }
 async function loadCategoryPage(categoryName, opts = {}){
@@ -376,8 +403,8 @@ async function loadCategoryPage(categoryName, opts = {}){
     if(sub) query = query.eq('subcategory_id', sub.id); else return {products:[], nextOffset:null, total:0};
   }
   if(opts.query){
-    const ids = await searchMatchIds(opts.query, category.id).catch(()=>({categoryIds:[],subcategoryIds:[]}));
-    query = query.or(searchOrParts(opts.query, {subcategoryIds: ids.subcategoryIds}));
+    const ids = await searchMatchIds(opts.query, category.id).catch(()=>({categoryIds:[],subcategoryIds:[],productIds:[]}));
+    query = query.or(searchOrParts(opts.query, {subcategoryIds: ids.subcategoryIds, productIds: ids.productIds}));
   }
   query = applySort(query, opts.sort).range(offset, offset + limit);
   const {data, error} = await query;
@@ -400,7 +427,7 @@ async function searchGlobalProducts(queryText, opts = {}){
   if(cached){ rememberProducts(cached.products); return cached; }
   let query = supabaseClient().from('products').select(PRODUCT_LIST_SELECT).eq('status','active');
   if(q){
-    const ids = await searchMatchIds(q).catch(()=>({categoryIds:[],subcategoryIds:[]}));
+    const ids = await searchMatchIds(q).catch(()=>({categoryIds:[],subcategoryIds:[],productIds:[]}));
     query = query.or(searchOrParts(q, ids));
   }
   query = applySort(query, opts.sort).range(offset, offset + limit);

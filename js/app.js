@@ -1,7 +1,7 @@
 'use strict';
 
-const INITIAL_PAGE_LIMIT = 10;
-const INFINITE_PAGE_LIMIT = 2;
+const INITIAL_PAGE_LIMIT = 20;
+const LOAD_MORE_PAGE_LIMIT = 20;
 const SORT_OPTIONS = [
   {value:'newest', label:'Newest'},
   {value:'price_asc', label:'Price: Low to High'},
@@ -17,7 +17,6 @@ let activeColorIndex = 0;
 let activeImageIndex = 0;
 const CATALOG_VIEW_TTL_MS = 30 * 60 * 1000;
 let catalogScrollTimer = null;
-let catalogInfiniteObserver = null;
 const WELLONE_PUBLIC_ORIGIN = 'https://wellone.in';
 
 function absoluteWelloneUrl(relative = ''){
@@ -135,7 +134,7 @@ function restoreCatalogView(){
   grid.classList.remove('skeleton-grid');
   grid.innerHTML = catalogState.products.map(p => productCard(p, p.Category || catalogState.category)).join('');
   renderCategoryHero();
-  updateCatalogInfiniteState();
+  updateCatalogLoadMoreState();
   requestAnimationFrame(() => setTimeout(() => window.scrollTo({top: cached.scrollY || 0, behavior:'auto'}), 40));
   return true;
 }
@@ -421,7 +420,7 @@ async function initHome(){
     dots.classList.toggle('hidden', offers.length <= 1);
     bindOfferDots(slider, dots);
   };
-  const [categories, offers] = await Promise.all([loadCategories(true), loadOffers(true)]);
+  const [categories, offers] = await Promise.all([loadCategories(false), loadOffers(false)]);
   renderOffers(offers);
   renderCategories(categories);
   refreshCategoriesInBackground(renderCategories);
@@ -429,28 +428,13 @@ async function initHome(){
   categories.slice(0,8).forEach(c => preloadImage(c.image));
   offers.slice(0,4).forEach(o => preloadImage(o.image));
 }
-function setCatalogScrollLoading(isLoading){
-  const loader = document.getElementById('catalogScrollLoader');
-  if(loader) loader.classList.toggle('hidden', !isLoading);
-}
-function updateCatalogInfiniteState(){
-  const sentinel = document.getElementById('catalogInfiniteSentinel');
-  if(!sentinel) return;
+function updateCatalogLoadMoreState(){
+  const button = document.getElementById('loadMoreBtn');
+  if(!button) return;
   const hasMore = Boolean(catalogState.nextOffset);
-  sentinel.classList.toggle('is-active', hasMore);
-  sentinel.setAttribute('aria-hidden', hasMore ? 'false' : 'true');
-  if(!hasMore) setCatalogScrollLoading(false);
-}
-function initCatalogInfiniteScroll(){
-  const sentinel = document.getElementById('catalogInfiniteSentinel');
-  if(!sentinel || catalogInfiniteObserver) return;
-  catalogInfiniteObserver = new IntersectionObserver(entries => {
-    if(!entries.some(entry => entry.isIntersecting)) return;
-    if(catalogState.loading || !catalogState.nextOffset) return;
-    loadCatalogProducts(false);
-  }, {root:null, rootMargin:'700px 0px 700px 0px', threshold:0});
-  catalogInfiniteObserver.observe(sentinel);
-  updateCatalogInfiniteState();
+  button.classList.toggle('hidden', !hasMore);
+  button.disabled = Boolean(catalogState.loading);
+  button.textContent = catalogState.loading ? 'Loading…' : 'Load more';
 }
 async function initCatalog(){
   updateCartCount();
@@ -465,10 +449,9 @@ async function initCatalog(){
   if(searchInput) searchInput.value = catalogState.query;
   updateSortButton();
   initCatalogEvents();
-  initCatalogInfiniteScroll();
   bindCatalogViewPersistence();
 
-  const categories = await loadCategories(true);
+  const categories = await loadCategories(false);
   if(!catalogState.category && !catalogState.query){
     document.getElementById('categorySection')?.classList.remove('hidden');
     document.getElementById('productsSection')?.classList.add('hidden');
@@ -499,6 +482,7 @@ function initCatalogEvents(){
   const input = document.getElementById('catalogSearchInput');
   const sortBtn = document.getElementById('sortButton');
   const filterToggle = document.getElementById('filterToggle');
+  const more = document.getElementById('loadMoreBtn');
   if(form && input) form.addEventListener('submit', event => {
     event.preventDefault();
     const q = input.value.trim();
@@ -519,6 +503,7 @@ function initCatalogEvents(){
   });
   if(sortBtn) sortBtn.addEventListener('click', openSortSheet);
   if(filterToggle) filterToggle.addEventListener('click', () => document.getElementById('filterChips')?.classList.toggle('hidden'));
+  if(more) more.addEventListener('click', () => loadCatalogProducts(false));
 }
 function updateCatalogUrl(){
   const params = new URLSearchParams();
@@ -566,19 +551,38 @@ async function loadCatalogProducts(reset){
   if(catalogState.loading) return;
   catalogState.loading = true;
   const grid = document.getElementById('productGrid');
+  const more = document.getElementById('loadMoreBtn');
   if(reset){
     catalogState.offset = 0;
     catalogState.products = [];
     if(grid) grid.innerHTML = skeletonCards(6, 'skeleton-product');
   }
-  setCatalogScrollLoading(!reset);
-  const pageLimit = reset ? INITIAL_PAGE_LIMIT : INFINITE_PAGE_LIMIT;
-  const options = {offset: catalogState.offset, limit: pageLimit, query: catalogState.query, subcategory: catalogState.subcategory, sort: catalogState.sort, forceRefresh: true};
-  const pack = catalogState.global
-    ? await searchGlobalProducts(catalogState.query, options).catch(() => ({products:[], nextOffset:null, total:0}))
-    : await loadCategoryPage(catalogState.category, options).catch(() => ({products:[], nextOffset:null, total:0}));
+  if(more){
+    more.disabled = true;
+    more.textContent = reset ? 'Load more' : 'Loading…';
+    if(reset) more.classList.add('hidden');
+  }
+  const pageLimit = reset ? INITIAL_PAGE_LIMIT : LOAD_MORE_PAGE_LIMIT;
+  const options = {offset: catalogState.offset, limit: pageLimit, query: catalogState.query, subcategory: catalogState.subcategory, sort: catalogState.sort, useCache: true, forceRefresh: false};
+  let pack;
+  try{
+    pack = catalogState.global
+      ? await searchGlobalProducts(catalogState.query, options)
+      : await loadCategoryPage(catalogState.category, options);
+  }catch(_error){
+    catalogState.loading = false;
+    if(more){
+      more.disabled = false;
+      more.textContent = 'Load more';
+      more.classList.toggle('hidden', !catalogState.nextOffset);
+    }
+    if(reset && grid){
+      grid.classList.remove('skeleton-grid');
+      grid.innerHTML = `<div class="empty-card"><h2>Products could not load</h2><p>Please check your connection and try again.</p></div>`;
+    }
+    return;
+  }
   catalogState.loading = false;
-  setCatalogScrollLoading(false);
   const newProducts = pack.products || [];
   catalogState.nextOffset = pack.nextOffset;
   catalogState.offset = pack.nextOffset || 0;
@@ -593,7 +597,7 @@ async function loadCatalogProducts(reset){
     grid.insertAdjacentHTML('beforeend', newProducts.map(p => productCard(p, p.Category || catalogState.category)).join(''));
   }
   requestAnimationFrame(() => newProducts.slice(0,4).forEach(p => preloadImage(firstImage((p.Variants && p.Variants[0] && p.Variants[0].images) || p.Images, p.Image))));
-  updateCatalogInfiniteState();
+  updateCatalogLoadMoreState();
   renderCategoryHero();
   persistCatalogView();
 }
@@ -629,7 +633,7 @@ async function initProduct(){
   }else if(holder){
     holder.innerHTML = `<div class="product-detail-skeleton"><div class="shimmer"></div><div><b></b><span></span><span></span><button></button></div></div>`;
   }
-  await loadCategories(true);
+  await loadCategories(false);
   const product = await findProduct(categoryName, productId, {forceRefresh:true});
   if(!product || cleanText(product.Status || 'active') !== 'active' || !holder){
     if(holder) holder.innerHTML = `<div class="empty-card"><h2>Product not found</h2><p>Please open the item again from catalog.</p></div>`;
