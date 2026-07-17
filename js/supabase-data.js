@@ -1,4 +1,4 @@
-/* Wellone customer data v63 — Supabase only
+/* Wellone customer data v64 — Supabase only
    Supabase Database + Supabase Storage only.
 */
 'use strict';
@@ -7,13 +7,16 @@ let categoryCache = null;
 let termsCache = null;
 let offersCache = null;
 const productCacheByKey = new Map();
-const FAST_CACHE_MS = 15 * 1000; // very short cache only for instant UI; refresh loads from Supabase
+const FAST_CACHE_MS = 20 * 1000; // very short cache only for instant UI; refresh loads from Supabase
 const REFRESH_GAP_MS = 8000;
 const refreshMarks = {};
 const storeUpdateListeners = new Set();
+const subcategoryCache = new Map();
+const SUBCATEGORY_CACHE_MS = 5 * 60 * 1000;
 let storeRealtimeChannel = null;
 let storeRealtimeStatus = 'idle';
 let storeUpdateDebounceTimer = null;
+const pendingStoreChanges = new Map();
 let storePollTimer = null;
 let lastStorePollAt = 0;
 const PRODUCT_DETAIL_SELECT = `
@@ -44,13 +47,13 @@ function sameName(a,b){ return cleanText(a).toLowerCase() === cleanText(b).toLow
 function normalizePrice(value){ return cleanText(value).replace(/^₹\s*/,'').replace(/,/g,''); }
 function money(value){ const n = Number(normalizePrice(value)); return Number.isFinite(n) && n > 0 ? n : 0; }
 function formatPrice(value){ const n = money(value); return n ? `₹${n}` : ''; }
-function cacheKey(name){ return 'wellone_supabase_v63_' + name; }
+function cacheKey(name){ return 'wellone_supabase_v64_' + name; }
 function now(){ return Date.now(); }
 function readAnyCache(name){ try{ const raw = localStorage.getItem(cacheKey(name)); if(!raw) return null; const pack = JSON.parse(raw); return pack && pack.data ? pack.data : null; }catch(e){ return null; } }
 function readFastCache(name){ try{ const raw = localStorage.getItem(cacheKey(name)); if(!raw) return null; const pack = JSON.parse(raw); if(!pack || !pack.time || now() - pack.time > FAST_CACHE_MS) return null; return pack.data || null; }catch(e){ return null; } }
 function pruneWelloneCache(maxEntries = 42){
   try{
-    const prefix = 'wellone_supabase_v63_';
+    const prefix = 'wellone_supabase_v64_';
     const entries = [];
     for(let i=0;i<localStorage.length;i++){
       const key = localStorage.key(i);
@@ -267,7 +270,7 @@ function findProductInCachedPages(categoryName, productId){
 
 function removeStoreCacheEntries(predicate){
   try{
-    const prefix = 'wellone_supabase_v63_';
+    const prefix = 'wellone_supabase_v64_';
     const removals = [];
     for(let i=0;i<localStorage.length;i++){
       const key = localStorage.key(i) || '';
@@ -280,40 +283,54 @@ function removeStoreCacheEntries(predicate){
 }
 function invalidateStoreData(table = ''){
   const name = cleanText(table);
-  const productTable = ['products','product_variants','product_images'].includes(name) || !name || name === 'poll';
-  const categoryMembershipMayChange = name === 'products' || name === 'categories' || !name || name === 'poll';
+  const productTable = ['products','product_variants','product_images'].includes(name) || !name;
   if(productTable){
     productCacheByKey.clear();
     removeStoreCacheEntries(key => key.startsWith('page_') || key.startsWith('global_') || key.startsWith('catalog_view_') || key.startsWith('product_') || key === 'last_open_product');
   }
-  if(categoryMembershipMayChange){
+  if(name === 'categories' || !name){
     categoryCache = null;
-    removeStoreCacheEntries(key => key === 'categories');
+    subcategoryCache.clear();
+    removeStoreCacheEntries(key => key === 'categories' || key.startsWith('subcategories_'));
+  }else if(name === 'subcategories'){
+    subcategoryCache.clear();
+    removeStoreCacheEntries(key => key.startsWith('subcategories_'));
   }
-  if(name === 'offer_slides' || !name || name === 'poll'){
+  if(name === 'offer_slides' || !name){
     offersCache = null;
     removeStoreCacheEntries(key => key === 'offers');
   }
-  if(name === 'terms' || !name || name === 'poll'){
+  if(name === 'terms' || !name){
     termsCache = null;
     removeStoreCacheEntries(key => key === 'terms');
   }
 }
 function emitStoreUpdate(change){
-  const table = cleanText(change && change.table);
+  const normalizedChange = change || {table:'', eventType:'UPDATE'};
+  const table = cleanText(normalizedChange.table);
   invalidateStoreData(table);
+  pendingStoreChanges.set(table || '__all__', normalizedChange);
   clearTimeout(storeUpdateDebounceTimer);
   storeUpdateDebounceTimer = setTimeout(() => {
+    const changes = Array.from(pendingStoreChanges.values());
+    pendingStoreChanges.clear();
+    const tables = uniqueClean(changes.map(item => cleanText(item && item.table)));
+    const batch = {
+      table: tables.length === 1 ? tables[0] : '',
+      tables,
+      changes,
+      eventType: changes.length === 1 ? cleanText(changes[0].eventType) : 'BATCH'
+    };
     storeUpdateListeners.forEach(listener => {
-      try{ listener(change || {table:'', eventType:'UPDATE'}); }catch(_error){}
+      try{ listener(batch); }catch(_error){}
     });
   }, table === 'poll' ? 0 : 220);
 }
 function startStorePollFallback(){
   if(storePollTimer) return;
   storePollTimer = setInterval(() => {
-    if(document.hidden || !navigator.onLine) return;
-    const interval = storeRealtimeStatus === 'SUBSCRIBED' ? 60000 : 30000;
+    if(document.hidden || !navigator.onLine || storeRealtimeStatus === 'SUBSCRIBED') return;
+    const interval = 45000;
     if(now() - lastStorePollAt < interval) return;
     lastStorePollAt = now();
     emitStoreUpdate({table:'poll', eventType:'POLL'});
@@ -325,7 +342,7 @@ function startStoreRealtime(){
   try{
     const client = supabaseClient();
     if(!client || typeof client.channel !== 'function') return;
-    let channel = client.channel('wellone-customer-live-v63');
+    let channel = client.channel('wellone-customer-live-v64');
     ['products','product_variants','product_images','categories','subcategories','offer_slides','terms'].forEach(table => {
       channel = channel.on('postgres_changes', {event:'*', schema:'public', table}, payload => {
         emitStoreUpdate({table, eventType:payload.eventType, new:payload.new, old:payload.old});
@@ -414,12 +431,23 @@ async function getCategoryByName(categoryName){
   const categories = await loadCategories(false);
   return categories.find(cat => sameName(cat.name, categoryName)) || null;
 }
-async function loadSubcategories(categoryName){
+async function loadSubcategories(categoryName, forceRefresh = false){
+  const key = cleanKey(categoryName);
+  const memory = subcategoryCache.get(key);
+  if(!forceRefresh && memory && now() - memory.time < SUBCATEGORY_CACHE_MS) return memory.data.slice();
+  const stored = !forceRefresh && readFastCache(`subcategories_${key}`);
+  if(stored){
+    subcategoryCache.set(key, {time:now(), data:stored});
+    return stored.slice();
+  }
   const category = await getCategoryByName(categoryName);
-  if(!category) return [];
+  if(!category) return memory ? memory.data.slice() : [];
   const {data, error} = await supabaseClient().from('subcategories').select('id,name,sort_order,is_active').eq('category_id', category.id).eq('is_active', true).order('sort_order', {ascending:true}).order('name', {ascending:true});
-  if(error) return [];
-  return uniqueClean((data || []).map(x => x.name));
+  if(error) return memory ? memory.data.slice() : [];
+  const result = uniqueClean((data || []).map(item => item.name));
+  subcategoryCache.set(key, {time:now(), data:result});
+  writeFastCache(`subcategories_${key}`, result);
+  return result.slice();
 }
 function applySort(query, sort){
   if(sort === 'price_asc') return query.order('price', {ascending:true, nullsFirst:false});

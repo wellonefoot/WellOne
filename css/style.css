@@ -2495,7 +2495,7 @@ body{
   .service-strip small{font-size:9.5px!important;}
 }
 
-/* v63 automatic catalog continuation: 20 products per request. */
+/* v64 automatic catalog continuation: 20 products per request. */
 .catalog-auto-loader{
   min-height:66px;
   display:flex;
@@ -2638,3 +2638,31 @@ body{
   .catalog-page .filter-chips .chip{padding:9px 12px!important;font-size:12px!important;}
 }
 .catalog-page .filter-chips.hidden{display:none!important;}
+
+
+/* v64 stable catalog switching: keeps layout fixed and swaps results atomically. */
+#productsSection{position:relative;}
+#productsSection.is-switching-products::after{
+  content:'Loading products…';
+  position:absolute;
+  inset:0 0 auto 0;
+  min-height:min(52vh,520px);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  padding:24px;
+  border-radius:22px;
+  background:rgba(255,255,255,.86);
+  color:#617500;
+  font-size:13px;
+  font-weight:900;
+  letter-spacing:.01em;
+  backdrop-filter:blur(3px);
+  -webkit-backdrop-filter:blur(3px);
+  z-index:8;
+  pointer-events:none;
+}
+#productsSection.is-switching-products .product-grid{
+  min-height:min(52vh,520px);
+}
+.catalog-page .filter-chips .chip{transition:background-color .14s ease,border-color .14s ease,color .14s ease,transform .14s ease!important;}
