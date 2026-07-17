@@ -1,0 +1,63 @@
+{
+  "id": "wellone-customer-catalog",
+  "name": "Wellone Fancy & Footwear",
+  "short_name": "Wellone",
+  "description": "Shop footwear, bags, cosmetics and accessories from Wellone Fancy & Footwear in Edavannappara.",
+  "start_url": "./index.html?source=pwa",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#ffffff",
+  "orientation": "portrait-primary",
+  "categories": [
+    "shopping",
+    "business"
+  ],
+  "icons": [
+    {
+      "src": "assets/favicon/favicon-16x16.png?v=69",
+      "sizes": "16x16",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "assets/favicon/favicon-32x32.png?v=69",
+      "sizes": "32x32",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "assets/favicon/apple-icon-180x180.png?v=69",
+      "sizes": "180x180",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "assets/favicon/wellone-icon-192-v46.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "assets/favicon/wellone-icon-512-v46.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "assets/favicon/wellone-icon-192-maskable-v46.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "assets/favicon/wellone-icon-512-maskable-v46.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "launch_handler": {
+    "client_mode": "navigate-existing"
+  }
+}

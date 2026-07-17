@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="preconnect" href="https://wnavzhrkwgnegjdetdno.supabase.co" crossorigin>
+  <link rel="dns-prefetch" href="//cdn.jsdelivr.net">
+  <link rel="dns-prefetch" href="//wnavzhrkwgnegjdetdno.supabase.co">
+  <title>Review Your Cart | Wellone</title>
+  <!-- SEO v54 -->
+  <meta name="description" content="Review selected Wellone products, check availability and continue your order.">
+  <meta name="robots" content="noindex,follow">
+  <link rel="canonical" href="https://wellone.in/cart.html">
+  <meta property="og:site_name" content="Wellone Fancy & Footwear">
+  <meta property="og:title" content="Review Your Cart | Wellone">
+  <meta property="og:description" content="Review selected Wellone products, check availability and continue your order.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://wellone.in/cart.html">
+  <meta property="og:image" content="https://wellone.in/assets/logo.png">
+  <meta property="og:image:alt" content="Wellone Fancy & Footwear">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Review Your Cart | Wellone">
+  <meta name="twitter:description" content="Review selected Wellone products, check availability and continue your order.">
+  <meta name="twitter:image" content="https://wellone.in/assets/logo.png">
+  <link rel="sitemap" type="application/xml" href="https://wellone.in/sitemap.xml">
+  <!-- /SEO v54 -->
+  <link rel="stylesheet" href="css/style.css?v=69">
+  <link rel="icon" href="./assets/favicon/favicon.ico" type="image/x-icon">
+  <link rel="apple-touch-icon" href="./assets/favicon/apple-icon-180x180.png">
+  <link rel="manifest" href="manifest.webmanifest">
+  <meta name="theme-color" content="#ffffff">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Wellone">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+</head>
+<body class="cart-page">
+  <header class="header site-header">
+    <div class="nav-wrap">
+      <button class="header-back" type="button" data-header-back aria-label="Go back" title="Back">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.5 5.5 8 12l6.5 6.5"></path></svg>
+      </button>
+      <a class="brand" href="index.html" aria-label="Wellone home"><img src="assets/logo.png?v=69" alt="Wellone logo" width="3144" height="824" decoding="async" fetchpriority="high"></a>
+      <nav class="nav" aria-label="Main navigation"><a href="index.html">Home</a><a href="about.html">About Us</a><a href="contact.html">Contact Us</a></nav>
+      <div class="header-actions">
+        <a class="header-icon header-search" href="catalog.html" aria-label="Search products">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.8"></circle><path d="m16.2 16.2 4.1 4.1"></path></svg>
+        </a>
+        <a class="header-icon header-cart" href="cart.html" aria-label="Open cart">
+          <svg viewBox="0 0 28 28" aria-hidden="true"><path d="M3.5 5.5h3l2.1 11.1a2.2 2.2 0 0 0 2.2 1.8h9.4a2.2 2.2 0 0 0 2.1-1.6l1.8-6.4H8"></path><circle cx="11.2" cy="22.5" r="1.6"></circle><circle cx="20.8" cy="22.5" r="1.6"></circle></svg>
+          <span class="header-cart-count" data-cart-count>0</span>
+        </a>
+        <button class="menu-toggle" type="button" aria-label="Open menu" aria-expanded="false"><span></span><span></span><span></span></button>
+      </div>
+    </div>
+  </header>
+  <main>
+    <section class="page-head pattern-card">
+      <p class="tag">your cart</p>
+      <h1>Review cart and confirm.</h1>
+    </section>
+    <section class="section cart-layout">
+      <div id="cartItems" class="cart-list"></div>
+      <aside class="cart-summary pattern-card">
+        <p class="cart-support-top page-support-line">Support: <a href="tel:+919746476813">+919746476813</a></p>
+        <h2>Total: ₹<span id="cartTotal">0</span></h2>
+        <div id="pageCartAction" class="cart-action-footer"><button class="btn primary full" type="button" onclick="proceedToCheckout('page')">Proceed to order</button></div>
+        <div id="pageCheckoutForm" class="checkout-form checkout-hidden page-checkout-fields">
+          <label>Name<input id="customerName" placeholder="Your name"></label>
+          <label>Phone<input id="customerPhone" placeholder="Your phone"></label>
+          <label>Address<textarea id="customerAddress" rows="3" placeholder="Delivery address"></textarea></label>
+          <button class="btn primary full whatsapp-checkout" type="button" onclick="checkoutWhatsApp('page')">Place Order</button>
+        </div>
+        <button class="btn light full" type="button" onclick="clearCart()" style="margin-top:10px">Clear Cart</button>
+      </aside>
+    </section>
+  </main>
+  <footer>© 2026 Wellone Fancy & Footwear.</footer>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="js/config.js?v=69"></script>
+  <script src="js/cart.js?v=69"></script>
+  <script src="js/supabase-data.js?v=69"></script>
+  <script src="js/app.js?v=69"></script>
+  <script>initCartPage();</script>
+  <script src="js/pwa-install.js?v=69"></script>
+</body>
+</html>
