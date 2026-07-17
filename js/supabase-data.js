@@ -1,4 +1,4 @@
-/* Wellone customer data v64 — Supabase only
+/* Wellone customer data v66 — stable event-driven updates
    Supabase Database + Supabase Storage only.
 */
 'use strict';
@@ -17,8 +17,9 @@ let storeRealtimeChannel = null;
 let storeRealtimeStatus = 'idle';
 let storeUpdateDebounceTimer = null;
 const pendingStoreChanges = new Map();
-let storePollTimer = null;
-let lastStorePollAt = 0;
+let storeRealtimeRetryTimer = null;
+let storeRealtimeEverSubscribed = false;
+let storeRealtimeHadDisconnect = false;
 const PRODUCT_DETAIL_SELECT = `
   id,name,slug,description,mrp,price,main_image_url,status,stock_status,sizes,colors,option_title,terms,created_at,updated_at,sort_order,
   categories(id,name,image_url),
@@ -47,13 +48,13 @@ function sameName(a,b){ return cleanText(a).toLowerCase() === cleanText(b).toLow
 function normalizePrice(value){ return cleanText(value).replace(/^₹\s*/,'').replace(/,/g,''); }
 function money(value){ const n = Number(normalizePrice(value)); return Number.isFinite(n) && n > 0 ? n : 0; }
 function formatPrice(value){ const n = money(value); return n ? `₹${n}` : ''; }
-function cacheKey(name){ return 'wellone_supabase_v64_' + name; }
+function cacheKey(name){ return 'wellone_supabase_v66_' + name; }
 function now(){ return Date.now(); }
 function readAnyCache(name){ try{ const raw = localStorage.getItem(cacheKey(name)); if(!raw) return null; const pack = JSON.parse(raw); return pack && pack.data ? pack.data : null; }catch(e){ return null; } }
 function readFastCache(name){ try{ const raw = localStorage.getItem(cacheKey(name)); if(!raw) return null; const pack = JSON.parse(raw); if(!pack || !pack.time || now() - pack.time > FAST_CACHE_MS) return null; return pack.data || null; }catch(e){ return null; } }
 function pruneWelloneCache(maxEntries = 42){
   try{
-    const prefix = 'wellone_supabase_v64_';
+    const prefix = 'wellone_supabase_v66_';
     const entries = [];
     for(let i=0;i<localStorage.length;i++){
       const key = localStorage.key(i);
@@ -270,7 +271,7 @@ function findProductInCachedPages(categoryName, productId){
 
 function removeStoreCacheEntries(predicate){
   try{
-    const prefix = 'wellone_supabase_v64_';
+    const prefix = 'wellone_supabase_v66_';
     const removals = [];
     for(let i=0;i<localStorage.length;i++){
       const key = localStorage.key(i) || '';
@@ -305,58 +306,88 @@ function invalidateStoreData(table = ''){
     removeStoreCacheEntries(key => key === 'terms');
   }
 }
-function emitStoreUpdate(change){
-  const normalizedChange = change || {table:'', eventType:'UPDATE'};
-  const table = cleanText(normalizedChange.table);
-  invalidateStoreData(table);
-  pendingStoreChanges.set(table || '__all__', normalizedChange);
+function flushStoreUpdates(){
   clearTimeout(storeUpdateDebounceTimer);
-  storeUpdateDebounceTimer = setTimeout(() => {
-    const changes = Array.from(pendingStoreChanges.values());
-    pendingStoreChanges.clear();
-    const tables = uniqueClean(changes.map(item => cleanText(item && item.table)));
-    const batch = {
-      table: tables.length === 1 ? tables[0] : '',
-      tables,
-      changes,
-      eventType: changes.length === 1 ? cleanText(changes[0].eventType) : 'BATCH'
-    };
-    storeUpdateListeners.forEach(listener => {
-      try{ listener(batch); }catch(_error){}
-    });
-  }, table === 'poll' ? 0 : 220);
+  storeUpdateDebounceTimer = null;
+  const changes = Array.from(pendingStoreChanges.values());
+  pendingStoreChanges.clear();
+  if(!changes.length) return;
+  const tables = uniqueClean(changes.flatMap(item => Array.isArray(item.tables) ? item.tables : [cleanText(item && item.table)]));
+  const batch = {
+    table: tables.length === 1 ? tables[0] : '',
+    tables,
+    changes,
+    eventType: changes.length === 1 ? cleanText(changes[0].eventType) : 'BATCH',
+    source: changes.some(item => item && item.source === 'admin') ? 'admin' : 'database'
+  };
+  storeUpdateListeners.forEach(listener => {
+    try{ listener(batch); }catch(_error){}
+  });
 }
-function startStorePollFallback(){
-  if(storePollTimer) return;
-  storePollTimer = setInterval(() => {
-    if(document.hidden || !navigator.onLine || storeRealtimeStatus === 'SUBSCRIBED') return;
-    const interval = 45000;
-    if(now() - lastStorePollAt < interval) return;
-    lastStorePollAt = now();
-    emitStoreUpdate({table:'poll', eventType:'POLL'});
-  }, 10000);
+function emitStoreUpdate(change, delay = 900){
+  const normalizedChange = change || {table:'', eventType:'UPDATE'};
+  const tables = uniqueClean(Array.isArray(normalizedChange.tables) ? normalizedChange.tables : [normalizedChange.table]);
+  if(!tables.length) tables.push('');
+  tables.forEach(table => {
+    invalidateStoreData(table);
+    pendingStoreChanges.set(table || '__all__', {...normalizedChange, table});
+  });
+  clearTimeout(storeUpdateDebounceTimer);
+  storeUpdateDebounceTimer = setTimeout(flushStoreUpdates, Math.max(0, Number(delay || 0)));
+}
+function scheduleStoreRealtimeReconnect(){
+  if(storeRealtimeRetryTimer || !storeUpdateListeners.size || !navigator.onLine) return;
+  storeRealtimeRetryTimer = setTimeout(() => {
+    storeRealtimeRetryTimer = null;
+    startStoreRealtime();
+  }, 2500);
+}
+function handleAdminBroadcast(payload){
+  const body = payload && payload.payload ? payload.payload : payload;
+  const tables = uniqueClean((body && body.tables) || []);
+  if(!tables.length) return;
+  // The admin sends this only after the whole save/delete operation finishes.
+  // Flush quickly and cancel the slower intermediate database-event batch.
+  emitStoreUpdate({tables, eventType:cleanText(body.action || 'ADMIN_CHANGE'), source:'admin', eventId:cleanText(body.eventId || '')}, 120);
 }
 function startStoreRealtime(){
   if(storeRealtimeChannel || !storeUpdateListeners.size) return;
-  startStorePollFallback();
   try{
     const client = supabaseClient();
     if(!client || typeof client.channel !== 'function') return;
-    let channel = client.channel('wellone-customer-live-v64');
+    let channel = client.channel('wellone-customer-live-v66', {config:{broadcast:{self:false}}});
+    channel = channel.on('broadcast', {event:'store-change'}, handleAdminBroadcast);
     ['products','product_variants','product_images','categories','subcategories','offer_slides','terms'].forEach(table => {
       channel = channel.on('postgres_changes', {event:'*', schema:'public', table}, payload => {
-        emitStoreUpdate({table, eventType:payload.eventType, new:payload.new, old:payload.old});
+        emitStoreUpdate({table, eventType:payload.eventType, new:payload.new, old:payload.old, source:'database'}, 1400);
       });
     });
     storeRealtimeChannel = channel.subscribe(status => {
       storeRealtimeStatus = status;
+      if(status === 'SUBSCRIBED'){
+        clearTimeout(storeRealtimeRetryTimer);
+        storeRealtimeRetryTimer = null;
+        if(storeRealtimeEverSubscribed && storeRealtimeHadDisconnect){
+          // One silent sync only after a real connection loss, never on a timer.
+          emitStoreUpdate({tables:['products','product_variants','product_images','categories','subcategories','offer_slides','terms'], eventType:'RECONNECTED', source:'reconnect'}, 180);
+        }
+        storeRealtimeEverSubscribed = true;
+        storeRealtimeHadDisconnect = false;
+        return;
+      }
       if(status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED'){
+        storeRealtimeHadDisconnect = true;
+        const failedChannel = storeRealtimeChannel;
         storeRealtimeChannel = null;
+        try{ if(failedChannel) client.removeChannel(failedChannel); }catch(_error){}
+        scheduleStoreRealtimeReconnect();
       }
     });
   }catch(_error){
     storeRealtimeChannel = null;
     storeRealtimeStatus = 'error';
+    storeRealtimeHadDisconnect = true;
+    scheduleStoreRealtimeReconnect();
   }
 }
 function subscribeToStoreUpdates(listener){
@@ -367,13 +398,12 @@ function subscribeToStoreUpdates(listener){
 }
 window.addEventListener('online', () => {
   if(!storeRealtimeChannel) startStoreRealtime();
-  emitStoreUpdate({table:'poll', eventType:'ONLINE'});
 });
 
 async function loadCategories(forceRefresh = false){
   if(!forceRefresh && categoryCache) return categoryCache;
   const cached = !forceRefresh && readFastCache('categories');
-  if(cached){ categoryCache = cached; refreshCategoriesInBackground(); return cached; }
+  if(cached){ categoryCache = cached; return cached; }
   const base = await supabaseClient()
     .from('categories')
     .select('id,name,image_url,description,sort_order,is_active')
@@ -404,7 +434,7 @@ function refreshCategoriesInBackground(onFresh){
 async function loadTerms(forceRefresh = false){
   if(!forceRefresh && termsCache) return termsCache;
   const cached = !forceRefresh && readFastCache('terms');
-  if(cached){ termsCache = cached; refreshTermsInBackground(); return cached; }
+  if(cached){ termsCache = cached; return cached; }
   const {data, error} = await supabaseClient().from('terms').select('id,name,icon,description,is_active').eq('is_active', true).order('name', {ascending:true});
   if(error) throw error;
   termsCache = normalizeTerms(data || []);
@@ -415,7 +445,7 @@ function refreshTermsInBackground(){ if(!canRefresh('terms')) return; loadTerms(
 async function loadOffers(forceRefresh = false){
   if(!forceRefresh && offersCache) return offersCache;
   const cached = !forceRefresh && (readFastCache('offers') || readAnyCache('offers'));
-  if(cached){ offersCache = cached; refreshOffersInBackground(); return cached; }
+  if(cached){ offersCache = cached; return cached; }
   const {data, error} = await supabaseClient().from('offer_slides').select('id,title,subtitle,image_url,mrp,price,quantity,link,product_id,is_active,sort_order').eq('is_active', true).order('sort_order', {ascending:true}).order('created_at', {ascending:false});
   if(error) throw error;
   offersCache = normalizeOffers(data || []);

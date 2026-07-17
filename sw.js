@@ -1,9 +1,9 @@
-const CACHE_VERSION = 'wellone-customer-v65-product-live-fix';
+const CACHE_VERSION = 'wellone-customer-v66-event-driven-stable';
 const SHELL_CACHE = `${CACHE_VERSION}-shell`;
 const RUNTIME_CACHE = `${CACHE_VERSION}-runtime`;
 const SHELL_ASSETS = [
   './', './index.html', './catalog.html', './product.html', './cart.html', './about.html', './contact.html',
-  './css/style.css?v=64', './js/config.js?v=50', './js/cart.js?v=56', './js/supabase-data.js?v=64', './js/app.js?v=65', './js/pwa-install.js?v=62',
+  './css/style.css?v=66', './js/config.js?v=50', './js/cart.js?v=56', './js/supabase-data.js?v=66', './js/app.js?v=66', './js/pwa-install.js?v=62',
   './manifest.webmanifest', './assets/logo.png?v=50', './assets/favicon/favicon.ico', './assets/favicon/wellone-icon-192-v46.png', './assets/favicon/wellone-icon-512-v46.png', './assets/favicon/wellone-icon-192-maskable-v46.png', './assets/favicon/wellone-icon-512-maskable-v46.png'
 ];
 self.addEventListener('install', event => {
