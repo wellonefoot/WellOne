@@ -1,4 +1,4 @@
-/* Wellone customer data v66 — stable event-driven updates
+/* Wellone customer data v67 — stable event-driven updates
    Supabase Database + Supabase Storage only.
 */
 'use strict';
@@ -48,13 +48,13 @@ function sameName(a,b){ return cleanText(a).toLowerCase() === cleanText(b).toLow
 function normalizePrice(value){ return cleanText(value).replace(/^₹\s*/,'').replace(/,/g,''); }
 function money(value){ const n = Number(normalizePrice(value)); return Number.isFinite(n) && n > 0 ? n : 0; }
 function formatPrice(value){ const n = money(value); return n ? `₹${n}` : ''; }
-function cacheKey(name){ return 'wellone_supabase_v66_' + name; }
+function cacheKey(name){ return 'wellone_supabase_v67_' + name; }
 function now(){ return Date.now(); }
 function readAnyCache(name){ try{ const raw = localStorage.getItem(cacheKey(name)); if(!raw) return null; const pack = JSON.parse(raw); return pack && pack.data ? pack.data : null; }catch(e){ return null; } }
 function readFastCache(name){ try{ const raw = localStorage.getItem(cacheKey(name)); if(!raw) return null; const pack = JSON.parse(raw); if(!pack || !pack.time || now() - pack.time > FAST_CACHE_MS) return null; return pack.data || null; }catch(e){ return null; } }
 function pruneWelloneCache(maxEntries = 42){
   try{
-    const prefix = 'wellone_supabase_v66_';
+    const prefix = 'wellone_supabase_v67_';
     const entries = [];
     for(let i=0;i<localStorage.length;i++){
       const key = localStorage.key(i);
@@ -271,7 +271,7 @@ function findProductInCachedPages(categoryName, productId){
 
 function removeStoreCacheEntries(predicate){
   try{
-    const prefix = 'wellone_supabase_v66_';
+    const prefix = 'wellone_supabase_v67_';
     const removals = [];
     for(let i=0;i<localStorage.length;i++){
       const key = localStorage.key(i) || '';
@@ -355,9 +355,9 @@ function startStoreRealtime(){
   try{
     const client = supabaseClient();
     if(!client || typeof client.channel !== 'function') return;
-    let channel = client.channel('wellone-customer-live-v66', {config:{broadcast:{self:false}}});
+    let channel = client.channel('wellone-customer-live-v67', {config:{broadcast:{self:false}}});
     channel = channel.on('broadcast', {event:'store-change'}, handleAdminBroadcast);
-    ['products','product_variants','product_images','categories','subcategories','offer_slides','terms'].forEach(table => {
+    ['products','product_variants','product_images','categories','subcategories','offer_slides'].forEach(table => {
       channel = channel.on('postgres_changes', {event:'*', schema:'public', table}, payload => {
         emitStoreUpdate({table, eventType:payload.eventType, new:payload.new, old:payload.old, source:'database'}, 1400);
       });
@@ -369,7 +369,7 @@ function startStoreRealtime(){
         storeRealtimeRetryTimer = null;
         if(storeRealtimeEverSubscribed && storeRealtimeHadDisconnect){
           // One silent sync only after a real connection loss, never on a timer.
-          emitStoreUpdate({tables:['products','product_variants','product_images','categories','subcategories','offer_slides','terms'], eventType:'RECONNECTED', source:'reconnect'}, 180);
+          emitStoreUpdate({tables:['products','product_variants','product_images','categories','subcategories','offer_slides'], eventType:'RECONNECTED', source:'reconnect'}, 180);
         }
         storeRealtimeEverSubscribed = true;
         storeRealtimeHadDisconnect = false;
@@ -436,7 +436,14 @@ async function loadTerms(forceRefresh = false){
   const cached = !forceRefresh && readFastCache('terms');
   if(cached){ termsCache = cached; return cached; }
   const {data, error} = await supabaseClient().from('terms').select('id,name,icon,description,is_active').eq('is_active', true).order('name', {ascending:true});
-  if(error) throw error;
+  if(error){
+    // The terms section is optional and was removed from some Wellone projects.
+    if(error.code === '42P01' || /relation .*terms.*does not exist/i.test(cleanText(error.message))){
+      termsCache = [];
+      return termsCache;
+    }
+    throw error;
+  }
   termsCache = normalizeTerms(data || []);
   writeFastCache('terms', termsCache);
   return termsCache;

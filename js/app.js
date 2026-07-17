@@ -906,7 +906,7 @@ function bindProductLiveUpdates(categoryName, productId){
   window.__welloneProductLiveBound = true;
   subscribeToStoreUpdates(change => {
     const tables = Array.isArray(change && change.tables) ? change.tables.map(cleanText) : [cleanText(change && change.table)].filter(Boolean);
-    const relevant = !tables.length || tables.some(table => ['products','product_variants','product_images','categories','subcategories','terms'].includes(table));
+    const relevant = !tables.length || tables.some(table => ['products','product_variants','product_images','categories','subcategories'].includes(table));
     if(!relevant) return;
     clearTimeout(productLiveRefreshTimer);
     productLiveRefreshTimer = setTimeout(async () => {
