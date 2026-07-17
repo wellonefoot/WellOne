@@ -1,4 +1,4 @@
-/* Wellone customer data v51 — Supabase only
+/* Wellone customer data v63 — Supabase only
    Supabase Database + Supabase Storage only.
 */
 'use strict';
@@ -10,6 +10,12 @@ const productCacheByKey = new Map();
 const FAST_CACHE_MS = 15 * 1000; // very short cache only for instant UI; refresh loads from Supabase
 const REFRESH_GAP_MS = 8000;
 const refreshMarks = {};
+const storeUpdateListeners = new Set();
+let storeRealtimeChannel = null;
+let storeRealtimeStatus = 'idle';
+let storeUpdateDebounceTimer = null;
+let storePollTimer = null;
+let lastStorePollAt = 0;
 const PRODUCT_DETAIL_SELECT = `
   id,name,slug,description,mrp,price,main_image_url,status,stock_status,sizes,colors,option_title,terms,created_at,updated_at,sort_order,
   categories(id,name,image_url),
@@ -38,13 +44,13 @@ function sameName(a,b){ return cleanText(a).toLowerCase() === cleanText(b).toLow
 function normalizePrice(value){ return cleanText(value).replace(/^₹\s*/,'').replace(/,/g,''); }
 function money(value){ const n = Number(normalizePrice(value)); return Number.isFinite(n) && n > 0 ? n : 0; }
 function formatPrice(value){ const n = money(value); return n ? `₹${n}` : ''; }
-function cacheKey(name){ return 'wellone_supabase_v51_' + name; }
+function cacheKey(name){ return 'wellone_supabase_v63_' + name; }
 function now(){ return Date.now(); }
 function readAnyCache(name){ try{ const raw = localStorage.getItem(cacheKey(name)); if(!raw) return null; const pack = JSON.parse(raw); return pack && pack.data ? pack.data : null; }catch(e){ return null; } }
 function readFastCache(name){ try{ const raw = localStorage.getItem(cacheKey(name)); if(!raw) return null; const pack = JSON.parse(raw); if(!pack || !pack.time || now() - pack.time > FAST_CACHE_MS) return null; return pack.data || null; }catch(e){ return null; } }
 function pruneWelloneCache(maxEntries = 42){
   try{
-    const prefix = 'wellone_supabase_v51_';
+    const prefix = 'wellone_supabase_v63_';
     const entries = [];
     for(let i=0;i<localStorage.length;i++){
       const key = localStorage.key(i);
@@ -259,9 +265,97 @@ function findProductInCachedPages(categoryName, productId){
   return null;
 }
 
+function removeStoreCacheEntries(predicate){
+  try{
+    const prefix = 'wellone_supabase_v63_';
+    const removals = [];
+    for(let i=0;i<localStorage.length;i++){
+      const key = localStorage.key(i) || '';
+      if(!key.startsWith(prefix)) continue;
+      const name = key.slice(prefix.length);
+      if(predicate(name)) removals.push(key);
+    }
+    removals.forEach(key => localStorage.removeItem(key));
+  }catch(_error){}
+}
+function invalidateStoreData(table = ''){
+  const name = cleanText(table);
+  const productTable = ['products','product_variants','product_images'].includes(name) || !name || name === 'poll';
+  const categoryMembershipMayChange = name === 'products' || name === 'categories' || !name || name === 'poll';
+  if(productTable){
+    productCacheByKey.clear();
+    removeStoreCacheEntries(key => key.startsWith('page_') || key.startsWith('global_') || key.startsWith('catalog_view_') || key.startsWith('product_') || key === 'last_open_product');
+  }
+  if(categoryMembershipMayChange){
+    categoryCache = null;
+    removeStoreCacheEntries(key => key === 'categories');
+  }
+  if(name === 'offer_slides' || !name || name === 'poll'){
+    offersCache = null;
+    removeStoreCacheEntries(key => key === 'offers');
+  }
+  if(name === 'terms' || !name || name === 'poll'){
+    termsCache = null;
+    removeStoreCacheEntries(key => key === 'terms');
+  }
+}
+function emitStoreUpdate(change){
+  const table = cleanText(change && change.table);
+  invalidateStoreData(table);
+  clearTimeout(storeUpdateDebounceTimer);
+  storeUpdateDebounceTimer = setTimeout(() => {
+    storeUpdateListeners.forEach(listener => {
+      try{ listener(change || {table:'', eventType:'UPDATE'}); }catch(_error){}
+    });
+  }, table === 'poll' ? 0 : 220);
+}
+function startStorePollFallback(){
+  if(storePollTimer) return;
+  storePollTimer = setInterval(() => {
+    if(document.hidden || !navigator.onLine) return;
+    const interval = storeRealtimeStatus === 'SUBSCRIBED' ? 60000 : 30000;
+    if(now() - lastStorePollAt < interval) return;
+    lastStorePollAt = now();
+    emitStoreUpdate({table:'poll', eventType:'POLL'});
+  }, 10000);
+}
+function startStoreRealtime(){
+  if(storeRealtimeChannel || !storeUpdateListeners.size) return;
+  startStorePollFallback();
+  try{
+    const client = supabaseClient();
+    if(!client || typeof client.channel !== 'function') return;
+    let channel = client.channel('wellone-customer-live-v63');
+    ['products','product_variants','product_images','categories','subcategories','offer_slides','terms'].forEach(table => {
+      channel = channel.on('postgres_changes', {event:'*', schema:'public', table}, payload => {
+        emitStoreUpdate({table, eventType:payload.eventType, new:payload.new, old:payload.old});
+      });
+    });
+    storeRealtimeChannel = channel.subscribe(status => {
+      storeRealtimeStatus = status;
+      if(status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED'){
+        storeRealtimeChannel = null;
+      }
+    });
+  }catch(_error){
+    storeRealtimeChannel = null;
+    storeRealtimeStatus = 'error';
+  }
+}
+function subscribeToStoreUpdates(listener){
+  if(typeof listener !== 'function') return () => {};
+  storeUpdateListeners.add(listener);
+  startStoreRealtime();
+  return () => storeUpdateListeners.delete(listener);
+}
+window.addEventListener('online', () => {
+  if(!storeRealtimeChannel) startStoreRealtime();
+  emitStoreUpdate({table:'poll', eventType:'ONLINE'});
+});
+
 async function loadCategories(forceRefresh = false){
   if(!forceRefresh && categoryCache) return categoryCache;
-  const cached = !forceRefresh && (readFastCache('categories') || readAnyCache('categories'));
+  const cached = !forceRefresh && readFastCache('categories');
   if(cached){ categoryCache = cached; refreshCategoriesInBackground(); return cached; }
   const base = await supabaseClient()
     .from('categories')
@@ -331,8 +425,8 @@ function applySort(query, sort){
   if(sort === 'price_asc') return query.order('price', {ascending:true, nullsFirst:false});
   if(sort === 'price_desc') return query.order('price', {ascending:false, nullsFirst:false});
   if(sort === 'discount_desc') return query.order('discount_amount', {ascending:false, nullsFirst:false}).order('created_at', {ascending:false});
-  if(sort === 'name_asc') return query.order('name', {ascending:true});
-  return query.order('created_at', {ascending:false});
+  if(sort === 'name_asc') return query.order('name', {ascending:true}).order('id', {ascending:true});
+  return query.order('created_at', {ascending:false}).order('id', {ascending:false});
 }
 function safeLike(q){ return String(q || '').replace(/[%_]/g, m => '\\' + m).replace(/[,()]/g, ' '); }
 function searchTerms(q){

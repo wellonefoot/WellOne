@@ -17,6 +17,11 @@ let activeColorIndex = 0;
 let activeImageIndex = 0;
 const CATALOG_VIEW_TTL_MS = 30 * 60 * 1000;
 let catalogScrollTimer = null;
+let lastCatalogNetworkLoadAt = 0;
+let catalogAutoObserver = null;
+let catalogAutoScrollHandler = null;
+let catalogLiveRefreshTimer = null;
+let productLiveRefreshTimer = null;
 const WELLONE_PUBLIC_ORIGIN = 'https://wellone.in';
 
 function absoluteWelloneUrl(relative = ''){
@@ -134,9 +139,9 @@ function restoreCatalogView(){
   grid.classList.remove('skeleton-grid');
   grid.innerHTML = catalogState.products.map(p => productCard(p, p.Category || catalogState.category)).join('');
   renderCategoryHero();
-  updateCatalogLoadMoreState();
+  updateCatalogAutoLoaderState();
   requestAnimationFrame(() => setTimeout(() => window.scrollTo({top: cached.scrollY || 0, behavior:'auto'}), 40));
-  return true;
+  return cached;
 }
 function findProductInState(categoryName, productId){
   const id = cleanText(productId);
@@ -393,17 +398,21 @@ function initSearchForm(formId, inputId, targetBuilder){
 }
 async function initHome(){
   updateCartCount();
+  let renderedCategories = [];
+  let renderedOffers = [];
   const holder = document.getElementById('homeCategories');
   if(holder) holder.innerHTML = skeletonCards(8);
   initSearchForm('homeSearchForm','homeSearchInput', q => `catalog.html${q ? '?q=' + encodeURIComponent(q) : ''}`);
 
   const renderCategories = categories => {
+    renderedCategories = categories || [];
     if(!holder) return;
     holder.classList.remove('skeleton-grid');
     holder.innerHTML = categories.length ? categories.map(categoryCard).join('') : `<div class="empty-card"><h2>No categories added</h2><p>Add categories from the admin panel.</p></div>`;
     attachCategoryWarmup(holder);
   };
   const renderOffers = offers => {
+    renderedOffers = offers || [];
     const section = document.getElementById('offerSection');
     const slider = document.getElementById('offerSlider');
     if(!section || !slider) return;
@@ -427,14 +436,55 @@ async function initHome(){
   refreshOffersInBackground(renderOffers);
   categories.slice(0,8).forEach(c => preloadImage(c.image));
   offers.slice(0,4).forEach(o => preloadImage(o.image));
+  if(typeof subscribeToStoreUpdates === 'function' && !window.__welloneHomeLiveBound){
+    window.__welloneHomeLiveBound = true;
+    let homeRefreshTimer = null;
+    subscribeToStoreUpdates(change => {
+      const table = cleanText(change && change.table);
+      clearTimeout(homeRefreshTimer);
+      homeRefreshTimer = setTimeout(() => {
+        if(document.hidden) return;
+        if(!table || table === 'poll' || ['products','categories'].includes(table)){
+          loadCategories(true).then(fresh => { if(!isSameData(renderedCategories, fresh)) renderCategories(fresh); }).catch(()=>{});
+        }
+        if(!table || table === 'poll' || table === 'offer_slides'){
+          loadOffers(true).then(fresh => { if(!isSameData(renderedOffers, fresh)) renderOffers(fresh); }).catch(()=>{});
+        }
+      }, table === 'poll' ? 120 : 850);
+    });
+  }
 }
-function updateCatalogLoadMoreState(){
-  const button = document.getElementById('loadMoreBtn');
-  if(!button) return;
-  const hasMore = Boolean(catalogState.nextOffset);
-  button.classList.toggle('hidden', !hasMore);
-  button.disabled = Boolean(catalogState.loading);
-  button.textContent = catalogState.loading ? 'Loading…' : 'Load more';
+function updateCatalogAutoLoaderState(){
+  const loader = document.getElementById('catalogAutoLoader');
+  if(!loader) return;
+  const hasMore = catalogState.nextOffset !== null && catalogState.nextOffset !== undefined;
+  loader.classList.toggle('hidden', !hasMore);
+  loader.classList.toggle('is-loading', hasMore && Boolean(catalogState.loading));
+  loader.setAttribute('aria-busy', hasMore && catalogState.loading ? 'true' : 'false');
+}
+function maybeLoadNextCatalogPage(){
+  if(catalogState.loading) return;
+  if(catalogState.nextOffset === null || catalogState.nextOffset === undefined) return;
+  loadCatalogProducts(false, {forceRefresh:true});
+}
+function setupCatalogAutoLoader(){
+  const loader = document.getElementById('catalogAutoLoader');
+  if(!loader || loader.dataset.bound === 'true') return;
+  loader.dataset.bound = 'true';
+  if('IntersectionObserver' in window){
+    catalogAutoObserver = new IntersectionObserver(entries => {
+      if(entries.some(entry => entry.isIntersecting)) maybeLoadNextCatalogPage();
+    }, {root:null, rootMargin:'500px 0px 500px', threshold:0.01});
+    catalogAutoObserver.observe(loader);
+    return;
+  }
+  catalogAutoScrollHandler = () => {
+    if(catalogState.loading || catalogState.nextOffset === null || catalogState.nextOffset === undefined) return;
+    const rect = loader.getBoundingClientRect();
+    if(rect.top <= window.innerHeight + 500) maybeLoadNextCatalogPage();
+  };
+  window.addEventListener('scroll', catalogAutoScrollHandler, {passive:true});
+  window.addEventListener('resize', catalogAutoScrollHandler, {passive:true});
 }
 async function initCatalog(){
   updateCartCount();
@@ -450,6 +500,8 @@ async function initCatalog(){
   updateSortButton();
   initCatalogEvents();
   bindCatalogViewPersistence();
+  setupCatalogAutoLoader();
+  bindCatalogLiveUpdates();
 
   const categories = await loadCategories(false);
   if(!catalogState.category && !catalogState.query){
@@ -475,14 +527,22 @@ async function initCatalog(){
     hideFiltersForGlobalSearch();
   }
   const restored = restoreCatalogView();
-  if(!restored) await loadCatalogProducts(true);
+  if(restored){
+    await loadCatalogProducts(true, {
+      silent: true,
+      forceRefresh: true,
+      limit: Math.max(INITIAL_PAGE_LIMIT, catalogState.products.length),
+      preserveScrollY: Number(restored.scrollY || 0)
+    });
+  }else{
+    await loadCatalogProducts(true, {forceRefresh:true});
+  }
 }
 function initCatalogEvents(){
   const form = document.getElementById('catalogSearchForm');
   const input = document.getElementById('catalogSearchInput');
   const sortBtn = document.getElementById('sortButton');
   const filterToggle = document.getElementById('filterToggle');
-  const more = document.getElementById('loadMoreBtn');
   if(form && input) form.addEventListener('submit', event => {
     event.preventDefault();
     const q = input.value.trim();
@@ -503,7 +563,6 @@ function initCatalogEvents(){
   });
   if(sortBtn) sortBtn.addEventListener('click', openSortSheet);
   if(filterToggle) filterToggle.addEventListener('click', () => document.getElementById('filterChips')?.classList.toggle('hidden'));
-  if(more) more.addEventListener('click', () => loadCatalogProducts(false));
 }
 function updateCatalogUrl(){
   const params = new URLSearchParams();
@@ -547,23 +606,34 @@ async function renderFilterChips(){
     loadCatalogProducts(true);
   }));
 }
-async function loadCatalogProducts(reset){
+async function loadCatalogProducts(reset, behavior = {}){
   if(catalogState.loading) return;
   catalogState.loading = true;
   const grid = document.getElementById('productGrid');
-  const more = document.getElementById('loadMoreBtn');
+  const silent = Boolean(behavior.silent);
+  const forceRefresh = behavior.forceRefresh === undefined ? Boolean(reset) : Boolean(behavior.forceRefresh);
+  const requestOffset = reset ? 0 : catalogState.offset;
+  const preserveScrollY = Number.isFinite(Number(behavior.preserveScrollY)) ? Math.max(0, Number(behavior.preserveScrollY)) : null;
   if(reset){
     catalogState.offset = 0;
-    catalogState.products = [];
-    if(grid) grid.innerHTML = skeletonCards(6, 'skeleton-product');
+    catalogState.nextOffset = null;
+    if(!silent){
+      catalogState.products = [];
+      if(grid) grid.innerHTML = skeletonCards(6, 'skeleton-product');
+    }
   }
-  if(more){
-    more.disabled = true;
-    more.textContent = reset ? 'Load more' : 'Loading…';
-    if(reset) more.classList.add('hidden');
-  }
-  const pageLimit = reset ? INITIAL_PAGE_LIMIT : LOAD_MORE_PAGE_LIMIT;
-  const options = {offset: catalogState.offset, limit: pageLimit, query: catalogState.query, subcategory: catalogState.subcategory, sort: catalogState.sort, useCache: true, forceRefresh: false};
+  updateCatalogAutoLoaderState();
+  const requestedLimit = Number(behavior.limit || 0);
+  const pageLimit = requestedLimit > 0 ? requestedLimit : (reset ? INITIAL_PAGE_LIMIT : LOAD_MORE_PAGE_LIMIT);
+  const options = {
+    offset: requestOffset,
+    limit: pageLimit,
+    query: catalogState.query,
+    subcategory: catalogState.subcategory,
+    sort: catalogState.sort,
+    useCache: !forceRefresh,
+    forceRefresh
+  };
   let pack;
   try{
     pack = catalogState.global
@@ -571,22 +641,36 @@ async function loadCatalogProducts(reset){
       : await loadCategoryPage(catalogState.category, options);
   }catch(_error){
     catalogState.loading = false;
-    if(more){
-      more.disabled = false;
-      more.textContent = 'Load more';
-      more.classList.toggle('hidden', !catalogState.nextOffset);
-    }
-    if(reset && grid){
+    updateCatalogAutoLoaderState();
+    if(reset && grid && !silent){
       grid.classList.remove('skeleton-grid');
       grid.innerHTML = `<div class="empty-card"><h2>Products could not load</h2><p>Please check your connection and try again.</p></div>`;
     }
     return;
   }
+  lastCatalogNetworkLoadAt = Date.now();
   catalogState.loading = false;
   const newProducts = pack.products || [];
+  const unchangedSilentReset = reset && silent && isSameData(catalogState.products || [], newProducts);
   catalogState.nextOffset = pack.nextOffset;
   catalogState.offset = pack.nextOffset || 0;
-  catalogState.products = reset ? newProducts : catalogState.products.concat(newProducts);
+  if(unchangedSilentReset){
+    updateCatalogAutoLoaderState();
+    persistCatalogView();
+    return;
+  }
+  if(reset){
+    catalogState.products = newProducts;
+  }else{
+    const seen = new Set((catalogState.products || []).map(product => cleanText(product.ID)));
+    const uniqueNewProducts = newProducts.filter(product => {
+      const id = cleanText(product.ID);
+      if(!id || seen.has(id)) return false;
+      seen.add(id);
+      return true;
+    });
+    catalogState.products = catalogState.products.concat(uniqueNewProducts);
+  }
   if(!grid) return;
   grid.classList.remove('skeleton-grid');
   if(!catalogState.products.length){
@@ -594,13 +678,56 @@ async function loadCatalogProducts(reset){
   }else if(reset){
     grid.innerHTML = newProducts.map(p => productCard(p, p.Category || catalogState.category)).join('');
   }else if(newProducts.length){
-    grid.insertAdjacentHTML('beforeend', newProducts.map(p => productCard(p, p.Category || catalogState.category)).join(''));
+    const renderedIds = new Set(Array.from(grid.querySelectorAll('[data-product-id]')).map(node => cleanText(node.dataset.productId)));
+    const productsToAppend = newProducts.filter(product => !renderedIds.has(cleanText(product.ID)));
+    if(productsToAppend.length) grid.insertAdjacentHTML('beforeend', productsToAppend.map(p => productCard(p, p.Category || catalogState.category)).join(''));
   }
-  requestAnimationFrame(() => newProducts.slice(0,4).forEach(p => preloadImage(firstImage((p.Variants && p.Variants[0] && p.Variants[0].images) || p.Images, p.Image))));
-  updateCatalogLoadMoreState();
+  requestAnimationFrame(() => {
+    newProducts.slice(0,4).forEach(p => preloadImage(firstImage((p.Variants && p.Variants[0] && p.Variants[0].images) || p.Images, p.Image)));
+    if(preserveScrollY !== null) window.scrollTo({top:preserveScrollY, behavior:'auto'});
+  });
+  updateCatalogAutoLoaderState();
   renderCategoryHero();
   persistCatalogView();
 }
+function bindCatalogLiveUpdates(){
+  if(window.__welloneCatalogLiveBound || typeof subscribeToStoreUpdates !== 'function') return;
+  window.__welloneCatalogLiveBound = true;
+  subscribeToStoreUpdates(change => {
+    const table = cleanText(change && change.table);
+    const relevant = !table || table === 'poll' || ['products','product_variants','product_images','categories','subcategories'].includes(table);
+    if(!relevant) return;
+    clearTimeout(catalogLiveRefreshTimer);
+    catalogLiveRefreshTimer = setTimeout(async () => {
+      if(document.hidden) return;
+      if(!catalogState.category && !catalogState.query){
+        loadCategories(true).then(renderCatalogCategories).catch(()=>{});
+        return;
+      }
+      if(catalogState.category && (table === 'categories' || table === 'subcategories' || table === 'poll')){
+        renderFilterChips().catch(()=>{});
+      }
+      refreshVisibleCatalogFromNetwork();
+    }, table === 'poll' ? 120 : 850);
+  });
+}
+function refreshVisibleCatalogFromNetwork(){
+  if(!document.getElementById('productGrid') || (!catalogState.category && !catalogState.query) || catalogState.loading) return;
+  loadCatalogProducts(true, {
+    silent: true,
+    forceRefresh: true,
+    limit: Math.max(INITIAL_PAGE_LIMIT, catalogState.products.length || 0),
+    preserveScrollY: window.scrollY || 0
+  });
+}
+window.addEventListener('pageshow', event => {
+  if(event.persisted) refreshVisibleCatalogFromNetwork();
+});
+document.addEventListener('visibilitychange', () => {
+  if(document.visibilityState === 'visible' && lastCatalogNetworkLoadAt && Date.now() - lastCatalogNetworkLoadAt > 15000){
+    refreshVisibleCatalogFromNetwork();
+  }
+});
 
 function openSortSheet(){
   closeChoiceModal();
@@ -645,8 +772,35 @@ async function initProduct(){
   activeImageIndex = 0;
   applyProductSelectionFromUrl(product, params);
   renderProductDetail();
+  bindProductLiveUpdates(categoryName, productId);
 }
 
+function bindProductLiveUpdates(categoryName, productId){
+  if(window.__welloneProductLiveBound || typeof subscribeToStoreUpdates !== 'function') return;
+  window.__welloneProductLiveBound = true;
+  subscribeToStoreUpdates(change => {
+    const table = cleanText(change && change.table);
+    if(table && table !== 'poll' && !['products','product_variants','product_images','categories','subcategories','terms'].includes(table)) return;
+    clearTimeout(productLiveRefreshTimer);
+    productLiveRefreshTimer = setTimeout(async () => {
+      if(document.hidden) return;
+      try{
+        const fresh = await findProduct(categoryName, productId, {forceRefresh:true});
+        const holder = document.getElementById('productDetail');
+        if(!fresh || cleanText(fresh.Status || 'active') !== 'active'){
+          if(holder) holder.innerHTML = `<div class="empty-card"><h2>Product not found</h2><p>This item is no longer available.</p></div>`;
+          return;
+        }
+        if(isSameData(activeProduct, fresh)) return;
+        const params = new URLSearchParams(location.search);
+        activeProduct = fresh;
+        applyProductSelectionFromUrl(fresh, params);
+        activeImageIndex = Math.min(activeImageIndex, Math.max(0, productImages(fresh).length - 1));
+        renderProductDetail();
+      }catch(_error){}
+    }, table === 'poll' ? 120 : 850);
+  });
+}
 function variantPriceLine(product, variant){
   return `<small>Select this option</small>`;
 }
@@ -1184,7 +1338,7 @@ function renderCartItems(){
 // v23: server-first refresh when returning to catalog/product tab.
 document.addEventListener('visibilitychange', () => {
   if(document.hidden) return;
-  if(document.getElementById('productGrid') && (catalogState.category || catalogState.query)) loadCatalogProducts(true);
+  if(document.getElementById('productGrid') && (catalogState.category || catalogState.query)) refreshVisibleCatalogFromNetwork();
   if(document.getElementById('productDetail') && activeProduct){
     const params = new URLSearchParams(location.search);
     findProduct(params.get('cat') || '', params.get('id') || '', {forceRefresh:true}).then(p => { if(p){ activeProduct = p; applyProductSelectionFromUrl(p, params); activeImageIndex = 0; renderProductDetail(); } }).catch(()=>{});
