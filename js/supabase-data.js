@@ -1,4 +1,4 @@
-/* Wellone customer data v72 — admin-success event updates
+/* Wellone customer data v74 — admin-success event updates
    Supabase Database + Supabase Storage only.
 */
 'use strict';
@@ -53,13 +53,13 @@ function sameName(a,b){ return cleanText(a).toLowerCase() === cleanText(b).toLow
 function normalizePrice(value){ return cleanText(value).replace(/^₹\s*/,'').replace(/,/g,''); }
 function money(value){ const n = Number(normalizePrice(value)); return Number.isFinite(n) && n > 0 ? n : 0; }
 function formatPrice(value){ const n = money(value); return n ? `₹${n}` : ''; }
-function cacheKey(name){ return 'wellone_supabase_v72_' + name; }
+function cacheKey(name){ return 'wellone_supabase_v74_' + name; }
 function now(){ return Date.now(); }
 function readAnyCache(name){ try{ const raw = localStorage.getItem(cacheKey(name)); if(!raw) return null; const pack = JSON.parse(raw); return pack && pack.data ? pack.data : null; }catch(e){ return null; } }
 function readFastCache(name){ try{ const raw = localStorage.getItem(cacheKey(name)); if(!raw) return null; const pack = JSON.parse(raw); if(!pack || !pack.time || now() - pack.time > FAST_CACHE_MS) return null; return pack.data || null; }catch(e){ return null; } }
 function pruneWelloneCache(maxEntries = 42){
   try{
-    const prefix = 'wellone_supabase_v72_';
+    const prefix = 'wellone_supabase_v74_';
     const entries = [];
     for(let i=0;i<localStorage.length;i++){
       const key = localStorage.key(i);
@@ -80,7 +80,7 @@ function writeFastCache(name, data){
 }
 function clearLegacyWelloneCaches(){
   try{
-    const currentPrefix = 'wellone_supabase_v72_';
+    const currentPrefix = 'wellone_supabase_v74_';
     const removals = [];
     for(let i=0;i<localStorage.length;i++){
       const key = localStorage.key(i) || '';
@@ -287,7 +287,7 @@ function findProductInCachedPages(categoryName, productId){
 
 function removeStoreCacheEntries(predicate){
   try{
-    const prefix = 'wellone_supabase_v72_';
+    const prefix = 'wellone_supabase_v74_';
     const removals = [];
     for(let i=0;i<localStorage.length;i++){
       const key = localStorage.key(i) || '';

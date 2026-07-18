@@ -243,24 +243,70 @@ function productCardElement(product, categoryName){
   template.innerHTML = productCard(product, categoryName).trim();
   return template.content.firstElementChild;
 }
+function patchProductCardNode(node, product, categoryName){
+  const fresh = productCardElement(product, categoryName);
+  if(!node || !fresh) return fresh || node;
+
+  ['class','href','aria-label','onclick','onpointerenter','ontouchstart'].forEach(attribute => {
+    const value = fresh.getAttribute(attribute);
+    if(value === null) node.removeAttribute(attribute);
+    else if(node.getAttribute(attribute) !== value) node.setAttribute(attribute, value);
+  });
+  node.dataset.productSig = fresh.dataset.productSig || '';
+
+  const image = node.querySelector('[data-card-image]');
+  const freshImage = fresh.querySelector('[data-card-image]');
+  if(image && freshImage){
+    const nextSrc = freshImage.getAttribute('src') || '';
+    if(image.getAttribute('src') !== nextSrc){
+      image.parentElement?.classList.add('shimmer');
+      image.setAttribute('src', nextSrc);
+    }
+    if(image.alt !== freshImage.alt) image.alt = freshImage.alt;
+  }
+
+  const fields = ['badges','name','price'];
+  fields.forEach(field => {
+    const current = node.querySelector(`[data-card-${field}]`);
+    const next = fresh.querySelector(`[data-card-${field}]`);
+    if(!current || !next) return;
+    if(field === 'name'){
+      if(current.textContent !== next.textContent) current.textContent = next.textContent;
+    }else if(current.innerHTML !== next.innerHTML){
+      current.innerHTML = next.innerHTML;
+    }
+  });
+  return node;
+}
 function patchProductGrid(grid, products){
   if(!grid) return;
-  const existing = new Map(Array.from(grid.querySelectorAll(':scope > [data-product-id]')).map(node => [cleanText(node.dataset.productId), node]));
+  const existing = new Map();
+  Array.from(grid.querySelectorAll(':scope > [data-product-id]')).forEach(node => {
+    const id = cleanText(node.dataset.productId);
+    if(!existing.has(id)) existing.set(id, []);
+    existing.get(id).push(node);
+  });
   const desiredIds = new Set();
   const fragment = document.createDocumentFragment();
   (products || []).forEach(product => {
     const id = cleanText(product.ID);
-    if(!id) return;
+    if(!id || desiredIds.has(id)) return;
     desiredIds.add(id);
     const categoryName = product.Category || catalogState.category;
     const signature = stableProductCardSignature(product, categoryName);
-    let node = existing.get(id);
-    if(!node || node.dataset.productSig !== signature){
+    const matches = existing.get(id) || [];
+    let node = matches.shift() || null;
+    if(node && node.dataset.productSig !== signature){
+      node = patchProductCardNode(node, product, categoryName);
+    }
+    matches.forEach(duplicate => duplicate.remove());
+    existing.set(id, []);
+    if(!node){
       node = productCardElement(product, categoryName);
     }
     if(node) fragment.appendChild(node);
   });
-  existing.forEach((node, id) => { if(!desiredIds.has(id)) node.remove(); });
+  existing.forEach(nodes => nodes.forEach(node => node.remove()));
   Array.from(grid.children).forEach(node => { if(!node.matches('[data-product-id]')) node.remove(); });
   grid.appendChild(fragment);
 }
@@ -279,10 +325,10 @@ function productCard(product, categoryName){
   const unavailable = product.StockStatus === 'out_of_stock';
   const stockBadge = unavailable ? `<span class="product-badge stock-badge">Out of stock</span>` : '';
   return `<a class="product-card clickable-card ${unavailable ? 'is-out-stock' : ''}" data-product-id="${escapeHtml(product.ID)}" data-product-sig="${stableProductCardSignature(product, catName)}" href="${href}" onclick="persistCatalogView();cacheProductForOpen('${jsCat}','${jsId}')" onpointerenter="warmProductFromCard('${jsCat}','${jsId}')" ontouchstart="warmProductFromCard('${jsCat}','${jsId}')" aria-label="View ${escapeHtml(product.Name)}">
-    <div class="product-media shimmer"><img loading="lazy" decoding="async" src="${optimizeImageUrl(image, 620)}" onload="this.parentElement.classList.remove('shimmer')" onerror="this.src='${fallbackImageSync(catName)}'" alt="${escapeHtml(product.Name)}"></div>
+    <div class="product-media shimmer"><img data-card-image loading="lazy" decoding="async" src="${optimizeImageUrl(image, 620)}" onload="this.parentElement.classList.remove('shimmer')" onerror="this.src='${fallbackImageSync(catName)}'" alt="${escapeHtml(product.Name)}"></div>
     <div class="product-pad">
-      ${catBadge}${sub}${stockBadge}<h3>${escapeHtml(product.Name)}</h3>
-      ${priceHtml(product, variant)}
+      <div data-card-badges>${catBadge}${sub}${stockBadge}</div><h3 data-card-name>${escapeHtml(product.Name)}</h3>
+      <div data-card-price>${priceHtml(product, variant)}</div>
       <span class="product-card-view">View</span>
     </div>
   </a>`;
