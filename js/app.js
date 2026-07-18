@@ -704,6 +704,11 @@ async function renderFilterChips(options = {}){
       catalogState.offset = 0;
       chipBox.querySelectorAll('.chip').forEach(item => item.classList.toggle('active', item === btn));
       updateCatalogUrl();
+      const instantMatches = nextSubcategory
+        ? (catalogState.products || []).filter(product => sameName(product.Subcategory, nextSubcategory))
+        : (catalogState.products || []);
+      const grid = document.getElementById('productGrid');
+      if(grid && instantMatches.length) patchProductGrid(grid, instantMatches);
       // Keep the current cards visible and atomically replace only after the new result is ready.
       loadCatalogProducts(true, {forceRefresh:true, silent:true, preserveScrollY:window.scrollY || 0});
     });
@@ -837,13 +842,13 @@ function bindCatalogLiveUpdates(){
         }
         return;
       }
-      if(catalogState.category && has('subcategories')){
+      if(catalogState.category && (has('subcategories') || has('products'))){
         await renderFilterChips({forceRefresh:true, reloadIfSelectionRemoved:true, allowEmpty:true}).catch(()=>{});
       }
       if(has('products') || has('product_variants') || has('product_images') || has('categories') || has('subcategories')){
         refreshVisibleCatalogFromNetwork();
       }
-    }, 120);
+    }, 35);
   });
 }
 function refreshVisibleCatalogFromNetwork(){
@@ -926,7 +931,7 @@ function bindProductLiveUpdates(categoryName, productId){
         activeImageIndex = Math.min(activeImageIndex, Math.max(0, productImages(fresh).length - 1));
         renderProductDetail();
       }catch(_error){}
-    }, 180);
+    }, 50);
   });
 }
 function variantPriceLine(product, variant){
@@ -1455,10 +1460,24 @@ function shareProductLink(){
 function initCartPage(){
   if(window.WelloneCart && typeof WelloneCart.renderCartItems === 'function') WelloneCart.renderCartItems();
   else renderCartItems();
+  if(typeof subscribeToStoreUpdates === 'function' && !window.__welloneCartLiveBound){
+    window.__welloneCartLiveBound = true;
+    let cartLiveTimer = null;
+    subscribeToStoreUpdates(change => {
+      const tables = Array.isArray(change && change.tables) ? change.tables : [];
+      if(tables.length && !tables.some(table => ['products','product_variants','product_images','categories','subcategories'].includes(table))) return;
+      clearTimeout(cartLiveTimer);
+      cartLiveTimer = setTimeout(async () => {
+        try{
+          if(typeof checkCartAvailabilityAndRefresh === 'function') await checkCartAvailabilityAndRefresh();
+          if(window.WelloneCart && typeof WelloneCart.renderCartItems === 'function') WelloneCart.renderCartItems();
+        }catch(_error){}
+      }, 50);
+    });
+  }
 }
 function renderCartItems(){
   if(window.WelloneCart && WelloneCart.renderCartItems && WelloneCart.renderCartItems !== renderCartItems){
     return WelloneCart.renderCartItems();
   }
 }
-

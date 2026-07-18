@@ -4,5 +4,5 @@ const SITE_CONFIG = {
   supabaseAnonKey: 'sb_publishable_RbnMrDlHfEijBiejcRNPUg_mop2bqgM',
   storageBucket: 'product-images',
   whatsappNumber: '919746476813',
-  defaultCategoryImage: 'https://images.unsplash.com/photo-1594223274512-ad4803739b7c?auto=format&fit=crop&w=900&q=70'
+  defaultCategoryImage: 'https://images.unsplash.com/photo-1594223274512-ad4803739b7c?auto=format&fit=crop&w=900&q=71'
 };

@@ -1,4 +1,4 @@
-/* Wellone customer data v69 — admin-success event updates
+/* Wellone customer data v71 — admin-success event updates
    Supabase Database + Supabase Storage only.
 */
 'use strict';
@@ -12,6 +12,7 @@ const STORE_CHANNEL_NAME = 'wellone-store-events-v1';
 const STORE_EVENT_NAME = 'store-change';
 const storeUpdateListeners = new Set();
 const subcategoryCache = new Map();
+const subcategoryIdCache = new Map();
 const SUBCATEGORY_CACHE_MS = 5 * 60 * 1000;
 let storeRealtimeChannel = null;
 let storeRealtimeStatus = 'idle';
@@ -52,13 +53,13 @@ function sameName(a,b){ return cleanText(a).toLowerCase() === cleanText(b).toLow
 function normalizePrice(value){ return cleanText(value).replace(/^₹\s*/,'').replace(/,/g,''); }
 function money(value){ const n = Number(normalizePrice(value)); return Number.isFinite(n) && n > 0 ? n : 0; }
 function formatPrice(value){ const n = money(value); return n ? `₹${n}` : ''; }
-function cacheKey(name){ return 'wellone_supabase_v69_' + name; }
+function cacheKey(name){ return 'wellone_supabase_v71_' + name; }
 function now(){ return Date.now(); }
 function readAnyCache(name){ try{ const raw = localStorage.getItem(cacheKey(name)); if(!raw) return null; const pack = JSON.parse(raw); return pack && pack.data ? pack.data : null; }catch(e){ return null; } }
 function readFastCache(name){ try{ const raw = localStorage.getItem(cacheKey(name)); if(!raw) return null; const pack = JSON.parse(raw); if(!pack || !pack.time || now() - pack.time > FAST_CACHE_MS) return null; return pack.data || null; }catch(e){ return null; } }
 function pruneWelloneCache(maxEntries = 42){
   try{
-    const prefix = 'wellone_supabase_v69_';
+    const prefix = 'wellone_supabase_v71_';
     const entries = [];
     for(let i=0;i<localStorage.length;i++){
       const key = localStorage.key(i);
@@ -79,7 +80,7 @@ function writeFastCache(name, data){
 }
 function clearLegacyWelloneCaches(){
   try{
-    const currentPrefix = 'wellone_supabase_v69_';
+    const currentPrefix = 'wellone_supabase_v71_';
     const removals = [];
     for(let i=0;i<localStorage.length;i++){
       const key = localStorage.key(i) || '';
@@ -286,7 +287,7 @@ function findProductInCachedPages(categoryName, productId){
 
 function removeStoreCacheEntries(predicate){
   try{
-    const prefix = 'wellone_supabase_v69_';
+    const prefix = 'wellone_supabase_v71_';
     const removals = [];
     for(let i=0;i<localStorage.length;i++){
       const key = localStorage.key(i) || '';
@@ -307,9 +308,11 @@ function invalidateStoreData(table = ''){
   if(name === 'categories' || !name){
     categoryCache = null;
     subcategoryCache.clear();
+    subcategoryIdCache.clear();
     removeStoreCacheEntries(key => key === 'categories' || key.startsWith('subcategories_'));
   }else if(name === 'subcategories'){
     subcategoryCache.clear();
+    subcategoryIdCache.clear();
     removeStoreCacheEntries(key => key.startsWith('subcategories_'));
   }
   if(name === 'offer_slides' || !name){
@@ -373,6 +376,14 @@ function handleAdminBroadcast(payload){
     details:(body && body.details) || null
   }, 60);
 }
+function handleDatabaseChange(table, payload){
+  emitStoreUpdate({
+    tables:[table],
+    eventType:cleanText(payload && payload.eventType) || 'DATABASE_CHANGE',
+    source:'database',
+    eventId:''
+  }, 25);
+}
 function scheduleStoreRealtimeReconnect(){
   if(storeRealtimeRetryTimer || storeRealtimeChannel || storeRealtimeConnecting || !storeUpdateListeners.size || !navigator.onLine) return;
   const delay = Math.min(30000, 1200 * Math.pow(2, Math.min(storeRealtimeRetryAttempt, 5)));
@@ -394,6 +405,9 @@ function startStoreRealtime(){
     const channel = client
       .channel(STORE_CHANNEL_NAME, {config:{broadcast:{self:false, ack:true}}})
       .on('broadcast', {event:STORE_EVENT_NAME}, handleAdminBroadcast);
+    ['categories','subcategories','products','product_images','product_variants','offer_slides','terms'].forEach(table => {
+      channel.on('postgres_changes', {event:'*', schema:'public', table}, payload => handleDatabaseChange(table, payload));
+    });
     storeRealtimeChannel = channel;
     channel.subscribe(status => {
       if(channel !== storeRealtimeChannel) return;
@@ -506,22 +520,38 @@ async function loadSubcategories(categoryName, forceRefresh = false){
   const stored = !forceRefresh && readFastCache(`subcategories_${key}`);
   if(stored){
     subcategoryCache.set(key, {time:now(), data:stored});
-    return stored.slice();
+    if(subcategoryIdCache.has(key)) return stored.slice();
   }
   const category = await getCategoryByName(categoryName);
   if(!category) return [];
   const {data, error} = await supabaseClient()
     .from('subcategories')
-    .select('id,name,sort_order,is_active')
+    .select('id,name,sort_order,is_active,products!inner(id)')
     .eq('category_id', category.id)
     .eq('is_active', true)
+    .eq('products.status', 'active')
     .order('sort_order', {ascending:true})
-    .order('name', {ascending:true});
+    .order('name', {ascending:true})
+    .limit(1, {foreignTable:'products'});
   if(error) throw error;
+  const ids = new Map();
+  (data || []).forEach(item => ids.set(cleanKey(item.name), cleanText(item.id)));
+  subcategoryIdCache.set(key, ids);
   const result = uniqueClean((data || []).map(item => item.name));
   subcategoryCache.set(key, {time:now(), data:result});
   writeFastCache(`subcategories_${key}`, result);
   return result.slice();
+}
+async function getSubcategoryId(categoryName, subcategoryName){
+  const categoryKey = cleanKey(categoryName);
+  const subKey = cleanKey(subcategoryName);
+  if(!subKey) return '';
+  let ids = subcategoryIdCache.get(categoryKey);
+  if(!ids){
+    await loadSubcategories(categoryName, false);
+    ids = subcategoryIdCache.get(categoryKey);
+  }
+  return cleanText(ids && ids.get(subKey));
 }
 function applySort(query, sort){
   if(sort === 'price_asc') return query.order('price', {ascending:true, nullsFirst:false});
@@ -594,9 +624,8 @@ async function loadCategoryPage(categoryName, opts = {}){
   if(!category) return {products:[], nextOffset:null, total:0};
   let query = supabaseClient().from('products').select(PRODUCT_LIST_SELECT).eq('status','active').eq('category_id', category.id);
   if(opts.subcategory){
-    const {data: subs} = await supabaseClient().from('subcategories').select('id,name').eq('category_id', category.id).eq('is_active', true);
-    const sub = (subs || []).find(s => sameName(s.name, opts.subcategory));
-    if(sub) query = query.eq('subcategory_id', sub.id); else return {products:[], nextOffset:null, total:0};
+    const subcategoryId = await getSubcategoryId(categoryName, opts.subcategory);
+    if(subcategoryId) query = query.eq('subcategory_id', subcategoryId); else return {products:[], nextOffset:null, total:0};
   }
   if(opts.query){
     const ids = await searchMatchIds(opts.query, category.id).catch(()=>({categoryIds:[],subcategoryIds:[],productIds:[]}));
