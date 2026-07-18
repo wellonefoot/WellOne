@@ -1,6 +1,7 @@
 'use strict';
 
 const CART_KEY = 'wellone_cart_final_v27';
+const ORDER_CART_CLEAR_KEY = 'wellone_order_cart_clear_pending';
 const LEGACY_CART_KEYS = [
   'wellone_cart_final_v25','wellone_cart_final_v24','wellone_cart_final_v23','wellone_cart_final_v22','wellone_cart_final_v21','wellone_cart_final_v20','wellone_cart_final_v19','wellone_cart_final_v18','wellone_cart_final_v17','wellone_cart_final_v16','wellone_cart_final_v7','wellone_cart_final_v1','wellone_kids_saved_cart_v3',
   'wellone_kids_saved_cart_v2','wellone_kids_saved_cart','welloneCart','cart'
@@ -195,9 +196,23 @@ function changeCartQty(key, amount){
 }
 function clearCart(){
   localStorage.setItem(CART_KEY, '[]');
+  clearLegacyCartKeys();
   updateCartCount([]);
   if(typeof renderCartItems === 'function') renderCartItems();
   showSoftToast('Cart cleared');
+}
+function clearSubmittedOrderCart(){
+  localStorage.setItem(ORDER_CART_CLEAR_KEY, String(Date.now()));
+  localStorage.setItem(CART_KEY, '[]');
+  clearLegacyCartKeys();
+  updateCartCount([]);
+  if(typeof renderCartItems === 'function') renderCartItems();
+}
+function finishPendingOrderCartClear(){
+  if(!localStorage.getItem(ORDER_CART_CLEAR_KEY)) return;
+  localStorage.setItem(CART_KEY, '[]');
+  clearLegacyCartKeys();
+  localStorage.removeItem(ORDER_CART_CLEAR_KEY);
 }
 function cartItemHtml(item, index){
   const key = cartItemKey(item);
@@ -465,7 +480,9 @@ async function confirmOrderToWhatsApp(source = 'auto'){
     return;
   }
   clearCartNotices(context);
-  const whatsappUrl = `https://wa.me/${SITE_CONFIG.whatsappNumber}?text=${encodeURIComponent(orderMessage(customerName, customerPhone, customerAddress))}`;
+  const message = orderMessage(customerName, customerPhone, customerAddress);
+  const whatsappUrl = `https://wa.me/${SITE_CONFIG.whatsappNumber}?text=${encodeURIComponent(message)}`;
+  clearSubmittedOrderCart();
   window.location.assign(whatsappUrl);
 }
 function checkoutWhatsApp(source = 'auto'){ confirmOrderToWhatsApp(source); }
@@ -647,7 +664,7 @@ function initMobileMenu(){
     }
   });
 }
-function initCartSystem(){ setupCartTriggers(); setupCartItemNavigation(); initHeaderBackButtons(); initMobileMenu(); refreshCartEverywhere(); }
+function initCartSystem(){ finishPendingOrderCartClear(); setupCartTriggers(); setupCartItemNavigation(); initHeaderBackButtons(); initMobileMenu(); refreshCartEverywhere(); }
 let cartLiveUpdateTimer = null;
 window.addEventListener('wellone:store-update', event => {
   const tables = Array.isArray(event.detail && event.detail.tables) ? event.detail.tables : [];
@@ -661,7 +678,7 @@ window.addEventListener('wellone:store-update', event => {
   }, 30);
 });
 window.WelloneCart = { getCart, saveCart, addCartItem, removeCartItem, changeCartQty, clearCart, renderCartItems, openCartDrawer, closeCartDrawer, checkoutWhatsApp, showCheckoutForm, proceedToCheckout, checkCartAvailabilityAndRefresh, cartProductRelativeLink, goBackFromHeader };
-window.addEventListener('pageshow', refreshCartEverywhere);
+window.addEventListener('pageshow', () => { finishPendingOrderCartClear(); refreshCartEverywhere(); });
 window.addEventListener('storage', refreshCartEverywhere);
 document.addEventListener('visibilitychange', () => { if(!document.hidden) refreshCartEverywhere(); });
 if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initCartSystem);
