@@ -1,4 +1,4 @@
-/* Wellone customer data v71 — admin-success event updates
+/* Wellone customer data v72 — admin-success event updates
    Supabase Database + Supabase Storage only.
 */
 'use strict';
@@ -53,13 +53,13 @@ function sameName(a,b){ return cleanText(a).toLowerCase() === cleanText(b).toLow
 function normalizePrice(value){ return cleanText(value).replace(/^₹\s*/,'').replace(/,/g,''); }
 function money(value){ const n = Number(normalizePrice(value)); return Number.isFinite(n) && n > 0 ? n : 0; }
 function formatPrice(value){ const n = money(value); return n ? `₹${n}` : ''; }
-function cacheKey(name){ return 'wellone_supabase_v71_' + name; }
+function cacheKey(name){ return 'wellone_supabase_v72_' + name; }
 function now(){ return Date.now(); }
 function readAnyCache(name){ try{ const raw = localStorage.getItem(cacheKey(name)); if(!raw) return null; const pack = JSON.parse(raw); return pack && pack.data ? pack.data : null; }catch(e){ return null; } }
 function readFastCache(name){ try{ const raw = localStorage.getItem(cacheKey(name)); if(!raw) return null; const pack = JSON.parse(raw); if(!pack || !pack.time || now() - pack.time > FAST_CACHE_MS) return null; return pack.data || null; }catch(e){ return null; } }
 function pruneWelloneCache(maxEntries = 42){
   try{
-    const prefix = 'wellone_supabase_v71_';
+    const prefix = 'wellone_supabase_v72_';
     const entries = [];
     for(let i=0;i<localStorage.length;i++){
       const key = localStorage.key(i);
@@ -80,7 +80,7 @@ function writeFastCache(name, data){
 }
 function clearLegacyWelloneCaches(){
   try{
-    const currentPrefix = 'wellone_supabase_v71_';
+    const currentPrefix = 'wellone_supabase_v72_';
     const removals = [];
     for(let i=0;i<localStorage.length;i++){
       const key = localStorage.key(i) || '';
@@ -287,7 +287,7 @@ function findProductInCachedPages(categoryName, productId){
 
 function removeStoreCacheEntries(predicate){
   try{
-    const prefix = 'wellone_supabase_v71_';
+    const prefix = 'wellone_supabase_v72_';
     const removals = [];
     for(let i=0;i<localStorage.length;i++){
       const key = localStorage.key(i) || '';
@@ -342,6 +342,7 @@ function flushStoreUpdates(){
   storeUpdateListeners.forEach(listener => {
     try{ listener(batch); }catch(_error){}
   });
+  try{ window.dispatchEvent(new CustomEvent('wellone:store-update', {detail:batch})); }catch(_error){}
 }
 function emitStoreUpdate(change, delay = 80){
   const normalizedChange = change || {tables:[], eventType:'ADMIN_CHANGE'};
@@ -374,7 +375,7 @@ function handleAdminBroadcast(payload){
     source:'admin',
     eventId,
     details:(body && body.details) || null
-  }, 60);
+  }, 10);
 }
 function handleDatabaseChange(table, payload){
   emitStoreUpdate({
@@ -382,7 +383,7 @@ function handleDatabaseChange(table, payload){
     eventType:cleanText(payload && payload.eventType) || 'DATABASE_CHANGE',
     source:'database',
     eventId:''
-  }, 25);
+  }, 220);
 }
 function scheduleStoreRealtimeReconnect(){
   if(storeRealtimeRetryTimer || storeRealtimeChannel || storeRealtimeConnecting || !storeUpdateListeners.size || !navigator.onLine) return;
@@ -524,15 +525,20 @@ async function loadSubcategories(categoryName, forceRefresh = false){
   }
   const category = await getCategoryByName(categoryName);
   if(!category) return [];
-  const {data, error} = await supabaseClient()
-    .from('subcategories')
-    .select('id,name,sort_order,is_active,products!inner(id)')
-    .eq('category_id', category.id)
-    .eq('is_active', true)
-    .eq('products.status', 'active')
-    .order('sort_order', {ascending:true})
-    .order('name', {ascending:true})
-    .limit(1, {foreignTable:'products'});
+  let {data, error} = await supabaseClient().rpc('wellone_active_subcategories', {p_category_id:category.id});
+  if(error && /function|schema cache|wellone_active_subcategories/i.test(cleanText(error.message))){
+    const fallback = await supabaseClient()
+      .from('subcategories')
+      .select('id,name,sort_order,is_active,products!inner(id)')
+      .eq('category_id', category.id)
+      .eq('is_active', true)
+      .eq('products.status', 'active')
+      .order('sort_order', {ascending:true})
+      .order('name', {ascending:true})
+      .limit(1, {foreignTable:'products'});
+    data = fallback.data;
+    error = fallback.error;
+  }
   if(error) throw error;
   const ids = new Map();
   (data || []).forEach(item => ids.set(cleanKey(item.name), cleanText(item.id)));

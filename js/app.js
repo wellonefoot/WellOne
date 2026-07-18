@@ -1460,21 +1460,6 @@ function shareProductLink(){
 function initCartPage(){
   if(window.WelloneCart && typeof WelloneCart.renderCartItems === 'function') WelloneCart.renderCartItems();
   else renderCartItems();
-  if(typeof subscribeToStoreUpdates === 'function' && !window.__welloneCartLiveBound){
-    window.__welloneCartLiveBound = true;
-    let cartLiveTimer = null;
-    subscribeToStoreUpdates(change => {
-      const tables = Array.isArray(change && change.tables) ? change.tables : [];
-      if(tables.length && !tables.some(table => ['products','product_variants','product_images','categories','subcategories'].includes(table))) return;
-      clearTimeout(cartLiveTimer);
-      cartLiveTimer = setTimeout(async () => {
-        try{
-          if(typeof checkCartAvailabilityAndRefresh === 'function') await checkCartAvailabilityAndRefresh();
-          if(window.WelloneCart && typeof WelloneCart.renderCartItems === 'function') WelloneCart.renderCartItems();
-        }catch(_error){}
-      }, 50);
-    });
-  }
 }
 function renderCartItems(){
   if(window.WelloneCart && WelloneCart.renderCartItems && WelloneCart.renderCartItems !== renderCartItems){

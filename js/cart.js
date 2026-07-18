@@ -648,6 +648,18 @@ function initMobileMenu(){
   });
 }
 function initCartSystem(){ setupCartTriggers(); setupCartItemNavigation(); initHeaderBackButtons(); initMobileMenu(); refreshCartEverywhere(); }
+let cartLiveUpdateTimer = null;
+window.addEventListener('wellone:store-update', event => {
+  const tables = Array.isArray(event.detail && event.detail.tables) ? event.detail.tables : [];
+  if(tables.length && !tables.some(table => ['products','product_variants','product_images','categories','subcategories'].includes(table))) return;
+  clearTimeout(cartLiveUpdateTimer);
+  cartLiveUpdateTimer = setTimeout(async () => {
+    try{
+      await checkCartAvailabilityAndRefresh();
+      refreshCartEverywhere();
+    }catch(_error){}
+  }, 30);
+});
 window.WelloneCart = { getCart, saveCart, addCartItem, removeCartItem, changeCartQty, clearCart, renderCartItems, openCartDrawer, closeCartDrawer, checkoutWhatsApp, showCheckoutForm, proceedToCheckout, checkCartAvailabilityAndRefresh, cartProductRelativeLink, goBackFromHeader };
 window.addEventListener('pageshow', refreshCartEverywhere);
 window.addEventListener('storage', refreshCartEverywhere);
