@@ -1,9 +1,9 @@
-const CACHE_VERSION = 'wellone-customer-v75-clear-cart-after-order';
+const CACHE_VERSION = 'wellone-customer-v76-inventory-barcode-offers';
 const SHELL_CACHE = `${CACHE_VERSION}-shell`;
 const RUNTIME_CACHE = `${CACHE_VERSION}-runtime`;
 const SHELL_ASSETS = [
   './', './index.html', './catalog.html', './product.html', './cart.html', './about.html', './contact.html',
-  './css/style.css?v=75', './js/config.js?v=75', './js/cart.js?v=75', './js/supabase-data.js?v=75', './js/app.js?v=75', './js/pwa-install.js?v=75',
+  './css/style.css?v=76', './js/config.js?v=76', './js/cart.js?v=76', './js/supabase-data.js?v=76', './js/app.js?v=76', './js/pwa-install.js?v=76',
   './manifest.webmanifest', './assets/logo.png?v=74', './assets/favicon/favicon.ico',
   './assets/favicon/wellone-icon-192-v46.png', './assets/favicon/wellone-icon-512-v46.png',
   './assets/favicon/wellone-icon-192-maskable-v46.png', './assets/favicon/wellone-icon-512-maskable-v46.png'

@@ -1,4 +1,4 @@
-/* Wellone customer data v74 — admin-success event updates
+/* Wellone customer data v76 — inventory, barcode lookup, promotional items and admin-success event updates
    Supabase Database + Supabase Storage only.
 */
 'use strict';
@@ -6,6 +6,7 @@
 let categoryCache = null;
 let termsCache = null;
 let offersCache = null;
+let offerItemsCache = null;
 const productCacheByKey = new Map();
 const FAST_CACHE_MS = 20 * 1000; // instant-render cache; explicit admin events invalidate it
 const STORE_CHANNEL_NAME = 'wellone-store-events-v1';
@@ -23,14 +24,14 @@ let storeRealtimeConnecting = false;
 let storeRealtimeRetryAttempt = 0;
 const seenStoreEventIds = new Map();
 const PRODUCT_DETAIL_SELECT = `
-  id,name,slug,description,mrp,price,main_image_url,status,stock_status,sizes,colors,option_title,terms,created_at,updated_at,sort_order,
+  id,name,slug,description,mrp,price,main_image_url,status,stock_status,stock_quantity,track_inventory,sizes,colors,option_title,terms,created_at,updated_at,sort_order,
   categories(id,name,image_url),
   subcategories(id,name),
   product_images(id,image_url,storage_path,sort_order),
   product_variants(id,label,mrp,price,image_url,image_urls,terms,unit,stock,stock_status,sort_order)
 `;
 const PRODUCT_LIST_SELECT = `
-  id,name,slug,description,mrp,price,main_image_url,status,stock_status,sizes,colors,option_title,terms,created_at,updated_at,sort_order,
+  id,name,slug,description,mrp,price,main_image_url,status,stock_status,stock_quantity,track_inventory,sizes,colors,option_title,terms,created_at,updated_at,sort_order,
   categories(id,name,image_url),
   subcategories(id,name),
   product_variants(id,label,mrp,price,unit,stock,stock_status,sort_order)
@@ -53,13 +54,13 @@ function sameName(a,b){ return cleanText(a).toLowerCase() === cleanText(b).toLow
 function normalizePrice(value){ return cleanText(value).replace(/^₹\s*/,'').replace(/,/g,''); }
 function money(value){ const n = Number(normalizePrice(value)); return Number.isFinite(n) && n > 0 ? n : 0; }
 function formatPrice(value){ const n = money(value); return n ? `₹${n}` : ''; }
-function cacheKey(name){ return 'wellone_supabase_v74_' + name; }
+function cacheKey(name){ return 'wellone_supabase_v76_' + name; }
 function now(){ return Date.now(); }
 function readAnyCache(name){ try{ const raw = localStorage.getItem(cacheKey(name)); if(!raw) return null; const pack = JSON.parse(raw); return pack && pack.data ? pack.data : null; }catch(e){ return null; } }
 function readFastCache(name){ try{ const raw = localStorage.getItem(cacheKey(name)); if(!raw) return null; const pack = JSON.parse(raw); if(!pack || !pack.time || now() - pack.time > FAST_CACHE_MS) return null; return pack.data || null; }catch(e){ return null; } }
 function pruneWelloneCache(maxEntries = 42){
   try{
-    const prefix = 'wellone_supabase_v74_';
+    const prefix = 'wellone_supabase_v76_';
     const entries = [];
     for(let i=0;i<localStorage.length;i++){
       const key = localStorage.key(i);
@@ -80,7 +81,7 @@ function writeFastCache(name, data){
 }
 function clearLegacyWelloneCaches(){
   try{
-    const currentPrefix = 'wellone_supabase_v74_';
+    const currentPrefix = 'wellone_supabase_v76_';
     const removals = [];
     for(let i=0;i<localStorage.length;i++){
       const key = localStorage.key(i) || '';
@@ -143,6 +144,40 @@ function normalizeOffers(data){
     active: o.is_active !== false
   })).filter(o => o.active && o.image);
 }
+function offerLinkedProductId(link){
+  const raw = cleanText(link);
+  if(!raw) return '';
+  try{
+    const url = new URL(raw, (typeof location !== 'undefined' && location.href) ? location.href : 'https://wellone.in/');
+    return cleanText(url.searchParams.get('id'));
+  }catch(_error){ return ''; }
+}
+function normalizeOfferItems(data, productMap = new Map()){
+  const current = Date.now();
+  return (data || []).map((o,i) => {
+    const link = cleanText(o.item_link || 'catalog.html');
+    const product = productMap.get(offerLinkedProductId(link)) || null;
+    const validUntil = cleanText(o.valid_until || '');
+    const validTime = validUntil ? new Date(validUntil).getTime() : 0;
+    return {
+      id: cleanText(o.id || `offer-item-${i+1}`),
+      title: cleanText(o.title || (product && product.name) || 'Special offer'),
+      link,
+      offerPrice: dbPrice(o.offer_price),
+      discount: o.discount_percentage === null || o.discount_percentage === undefined ? '' : cleanText(o.discount_percentage),
+      validUntil,
+      active: o.is_active !== false && (!validTime || validTime > current),
+      productId: cleanText(product && product.id),
+      productName: cleanText(product && product.name),
+      image: optimizeImageUrl(cleanText(product && product.main_image_url), 620),
+      mrp: dbPrice(product && product.mrp),
+      productPrice: dbPrice(product && product.price),
+      stockStatus: cleanText(product && product.stock_status || 'in_stock'),
+      trackInventory: product && product.track_inventory === true,
+      stockQuantity: Math.max(0, Number(product && product.stock_quantity || 0) || 0)
+    };
+  }).filter(item => item.active && item.offerPrice);
+}
 function normalizeProduct(row){
   if(!row || !row.id || !row.name) return null;
   const category = cleanText(row.categories && row.categories.name);
@@ -170,7 +205,9 @@ function normalizeProduct(row){
     CreatedAt: cleanText(row.created_at || ''),
     UpdatedAt: cleanText(row.updated_at || ''),
     Status: cleanText(row.status || 'active'),
-    StockStatus: cleanText(row.stock_status || 'in_stock')
+    StockStatus: cleanText(row.stock_status || 'in_stock'),
+    TrackInventory: row.track_inventory === true,
+    StockQuantity: Math.max(0, Number(row.stock_quantity || 0) || 0)
   };
   const mainSizeOptions = splitOptions(product.Sizes || '').filter(Boolean);
   const fallbackSizes = mainSizeOptions.length ? mainSizeOptions : ['Standard'];
@@ -190,10 +227,15 @@ function normalizeProduct(row){
         images: ownImages.length ? ownImages : product.Images,
         hasOwnImages: ownImages.length > 0,
         terms: [],
-        stock: Number(v.stock || 0),
-        stockStatus: cleanText(v.stock_status || 'in_stock')
+        stock: Math.max(0, Number(v.stock || 0) || 0),
+        stockStatus: cleanText(v.stock_status || 'in_stock'),
+        trackInventory: product.TrackInventory,
+        inventorySource: 'variant'
       };
     });
+  const syntheticInventory = dbVariants.length
+    ? {stock:0, stockStatus:product.TrackInventory ? 'out_of_stock' : 'in_stock', trackInventory:product.TrackInventory, inventorySource:'synthetic'}
+    : {stock:product.StockQuantity, stockStatus:product.StockStatus, trackInventory:product.TrackInventory, inventorySource:'product'};
   const colorDbVariants = dbVariants.filter(v => cleanText(v.color));
   const legacyDbVariants = dbVariants.filter(v => !cleanText(v.color));
   if(colorDbVariants.length){
@@ -208,8 +250,7 @@ function normalizeProduct(row){
       images:product.Images,
       hasOwnImages:false,
       terms:[],
-      stock:0,
-      stockStatus:'in_stock',
+      ...syntheticInventory,
       isBase:i === 0
     }));
     colorDbVariants.forEach(v => {
@@ -230,8 +271,7 @@ function normalizeProduct(row){
       images:product.Images,
       hasOwnImages:false,
       terms:[],
-      stock:0,
-      stockStatus:'in_stock',
+      ...syntheticInventory,
       isBase:i === 0
     }));
     if(legacyDbVariants.length){
@@ -287,7 +327,7 @@ function findProductInCachedPages(categoryName, productId){
 
 function removeStoreCacheEntries(predicate){
   try{
-    const prefix = 'wellone_supabase_v74_';
+    const prefix = 'wellone_supabase_v76_';
     const removals = [];
     for(let i=0;i<localStorage.length;i++){
       const key = localStorage.key(i) || '';
@@ -318,6 +358,10 @@ function invalidateStoreData(table = ''){
   if(name === 'offer_slides' || !name){
     offersCache = null;
     removeStoreCacheEntries(key => key === 'offers');
+  }
+  if(name === 'offer_items' || !name){
+    offerItemsCache = null;
+    removeStoreCacheEntries(key => key === 'offer_items');
   }
   if(name === 'terms' || !name){
     termsCache = null;
@@ -406,7 +450,7 @@ function startStoreRealtime(){
     const channel = client
       .channel(STORE_CHANNEL_NAME, {config:{broadcast:{self:false, ack:true}}})
       .on('broadcast', {event:STORE_EVENT_NAME}, handleAdminBroadcast);
-    ['categories','subcategories','products','product_images','product_variants','offer_slides','terms'].forEach(table => {
+    ['categories','subcategories','products','product_images','product_variants','offer_slides','offer_items','terms'].forEach(table => {
       channel.on('postgres_changes', {event:'*', schema:'public', table}, payload => handleDatabaseChange(table, payload));
     });
     storeRealtimeChannel = channel;
@@ -500,6 +544,39 @@ async function loadOffers(forceRefresh = false){
   writeFastCache('offers', offersCache);
   return offersCache;
 }
+async function loadOfferItems(forceRefresh = false){
+  if(!forceRefresh && offerItemsCache) return offerItemsCache;
+  const cached = !forceRefresh && (readFastCache('offer_items') || readAnyCache('offer_items'));
+  if(cached){ offerItemsCache = cached; return cached; }
+  const {data, error} = await supabaseClient()
+    .from('offer_items')
+    .select('id,title,item_link,offer_price,discount_percentage,valid_until,is_active,sort_order,created_at')
+    .eq('is_active', true)
+    .order('sort_order', {ascending:true})
+    .order('created_at', {ascending:false})
+    .limit(36);
+  if(error){
+    if(error.code === '42P01' || /relation .*offer_items.*does not exist/i.test(cleanText(error.message))){
+      offerItemsCache = [];
+      return offerItemsCache;
+    }
+    throw error;
+  }
+  const rows = data || [];
+  const productIds = uniqueClean(rows.map(row => offerLinkedProductId(row.item_link))).slice(0, 36);
+  const productMap = new Map();
+  if(productIds.length){
+    const {data:products, error:productError} = await supabaseClient()
+      .from('products')
+      .select('id,name,mrp,price,main_image_url,status,stock_status,stock_quantity,track_inventory')
+      .in('id', productIds)
+      .eq('status','active');
+    if(!productError) (products || []).forEach(product => productMap.set(cleanText(product.id), product));
+  }
+  offerItemsCache = normalizeOfferItems(rows, productMap);
+  writeFastCache('offer_items', offerItemsCache);
+  return offerItemsCache;
+}
 async function getCategoryByName(categoryName){
   const name = cleanText(categoryName);
   if(!name) return null;
@@ -578,7 +655,8 @@ function numericSearchValue(q){
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 async function searchMatchIds(q, categoryId){
-  const terms = searchTerms(q).map(value => value.toLowerCase());
+  const rawQuery = cleanText(q);
+  const terms = searchTerms(rawQuery).map(value => value.toLowerCase());
   if(!terms.length) return {categoryIds:[], subcategoryIds:[], productIds:[]};
   const variantOr = terms.flatMap(term => {
     const safe = safeLike(term);
@@ -589,12 +667,21 @@ async function searchMatchIds(q, categoryId){
     .select('product_id,label,unit')
     .or(variantOr)
     .limit(60);
-  const [catRes, subRes, variantRes] = await Promise.all([
+  let barcodeQuery = supabaseClient()
+    .from('products')
+    .select('id')
+    .eq('barcode_enabled', true)
+    .eq('barcode', rawQuery)
+    .eq('status', 'active')
+    .limit(20);
+  if(categoryId) barcodeQuery = barcodeQuery.eq('category_id', categoryId);
+  const [catRes, subRes, variantRes, barcodeRes] = await Promise.all([
     supabaseClient().from('categories').select('id,name').eq('is_active', true),
     categoryId
       ? supabaseClient().from('subcategories').select('id,name,category_id').eq('is_active', true).eq('category_id', categoryId)
       : supabaseClient().from('subcategories').select('id,name,category_id').eq('is_active', true),
-    variantQuery
+    variantQuery,
+    barcodeQuery
   ]);
   const matchesAny = value => {
     const text = cleanText(value).toLowerCase();
@@ -602,7 +689,10 @@ async function searchMatchIds(q, categoryId){
   };
   const categoryIds = uniqueClean((catRes.data || []).filter(c => matchesAny(c.name)).map(c => c.id));
   const subcategoryIds = uniqueClean((subRes.data || []).filter(s => matchesAny(s.name)).map(s => s.id));
-  const productIds = uniqueClean((variantRes.data || []).map(v => v.product_id)).slice(0, 60);
+  const productIds = uniqueClean([
+    ...(variantRes.data || []).map(v => v.product_id),
+    ...(barcodeRes.data || []).map(product => product.id)
+  ]).slice(0, 80);
   return {categoryIds, subcategoryIds, productIds};
 }
 function searchOrParts(q, ids = {}){
@@ -672,6 +762,20 @@ async function searchGlobalProducts(queryText, opts = {}){
   const pack = {products, nextOffset, total: offset + products.length + (hasMore ? 1 : 0)};
   writeFastCache(cacheName, pack);
   return pack;
+}
+async function findProductByBarcode(code){
+  const value = cleanText(code);
+  if(!value) return null;
+  const {data, error} = await supabaseClient()
+    .from('products')
+    .select('id,name,status,categories(id,name)')
+    .eq('barcode_enabled', true)
+    .eq('barcode', value)
+    .eq('status', 'active')
+    .maybeSingle();
+  if(error) throw error;
+  if(!data || !data.id) return null;
+  return {id:cleanText(data.id), name:cleanText(data.name), category:cleanText(data.categories && data.categories.name)};
 }
 async function findProduct(categoryName, productId, opts = {}){
   if(!opts.forceRefresh){

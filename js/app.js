@@ -25,6 +25,9 @@ let productLiveRefreshTimer = null;
 let catalogRequestSerial = 0;
 let filterRenderSerial = 0;
 let catalogRefreshPending = false;
+let customerBarcodeStream = null;
+let customerBarcodeScanTimer = null;
+let customerBarcodeDetector = null;
 const WELLONE_PUBLIC_ORIGIN = 'https://wellone.in';
 
 function absoluteWelloneUrl(relative = ''){
@@ -228,8 +231,9 @@ function stableProductCardSignature(product, categoryName){
   const source = JSON.stringify([
     cleanText(product.ID), cleanText(product.Name), cleanText(product.Category || categoryName), cleanText(product.Subcategory),
     cleanText(product.MRP), cleanText(product.Price), cleanText(product.Image), cleanText(product.StockStatus),
+    product.TrackInventory === true, Number(product.StockQuantity || 0),
     cleanText(product.UpdatedAt), cleanText(variant.label), cleanText(variant.price), cleanText(variant.mrp),
-    cleanText(variant.stockStatus), (variant.images || []).join('|')
+    cleanText(variant.stockStatus), Number(variant.stock || 0), (variant.images || []).join('|')
   ]);
   let hash = 2166136261;
   for(let i=0;i<source.length;i++){
@@ -322,7 +326,7 @@ function productCard(product, categoryName){
   const jsId = attrSafeJs(product.ID);
   const sub = product.Subcategory ? `<span class="product-badge">${escapeHtml(product.Subcategory)}</span>` : '';
   const catBadge = catalogState.global && catName ? `<span class="product-badge soft-badge">${escapeHtml(catName)}</span>` : '';
-  const unavailable = product.StockStatus === 'out_of_stock';
+  const unavailable = !productIsAvailable(product);
   const stockBadge = unavailable ? `<span class="product-badge stock-badge">Out of stock</span>` : '';
   return `<a class="product-card clickable-card ${unavailable ? 'is-out-stock' : ''}" data-product-id="${escapeHtml(product.ID)}" data-product-sig="${stableProductCardSignature(product, catName)}" href="${href}" onclick="persistCatalogView();cacheProductForOpen('${jsCat}','${jsId}')" onpointerenter="warmProductFromCard('${jsCat}','${jsId}')" ontouchstart="warmProductFromCard('${jsCat}','${jsId}')" aria-label="View ${escapeHtml(product.Name)}">
     <div class="product-media shimmer"><img data-card-image loading="lazy" decoding="async" src="${optimizeImageUrl(image, 620)}" onload="this.parentElement.classList.remove('shimmer')" onerror="this.src='${fallbackImageSync(catName)}'" alt="${escapeHtml(product.Name)}"></div>
@@ -339,6 +343,115 @@ function offerCard(offer, index = 0){
   return `<a class="offer-card deal-banner-card" href="${escapeHtml(href)}" aria-label="${escapeHtml(offer.title || 'Discount banner')}" data-offer-index="${index}">
     <div class="offer-img deal-banner-img shimmer"><img loading="${index === 0 ? 'eager' : 'lazy'}" decoding="async" src="${optimizeImageUrl(offer.image, 1600)}" onload="this.parentElement.classList.remove('shimmer')" alt="${escapeHtml(offer.title || 'Discount banner')}"></div>
   </a>`;
+}
+function safeStoreLink(value, fallback = 'catalog.html'){
+  const raw = cleanText(value);
+  if(!raw) return fallback;
+  try{
+    const url = new URL(raw, location.href);
+    if(url.protocol !== 'http:' && url.protocol !== 'https:') return fallback;
+    return /^[a-z][a-z0-9+.-]*:/i.test(raw) ? url.href : raw;
+  }catch(_error){ return fallback; }
+}
+function offerItemExpiryLabel(value){
+  const text = cleanText(value);
+  if(!text) return '';
+  const date = new Date(text);
+  if(!Number.isFinite(date.getTime())) return '';
+  return `Valid until ${date.toLocaleDateString('en-IN', {day:'numeric', month:'short', year:'numeric'})}`;
+}
+function offerItemCard(item){
+  const href = safeStoreLink(item.link || 'catalog.html');
+  const title = item.title || item.productName || 'Special offer';
+  const image = item.image || SITE_CONFIG.defaultCategoryImage;
+  const offerPrice = money(item.offerPrice);
+  const referencePrice = Math.max(money(item.mrp), money(item.productPrice));
+  const discount = Number(item.discount || 0);
+  const expiry = offerItemExpiryLabel(item.validUntil);
+  const unavailable = cleanText(item.stockStatus || 'in_stock') === 'out_of_stock' || (item.trackInventory === true && Number(item.stockQuantity || 0) <= 0);
+  return `<a class="offer-item-card ${unavailable ? 'is-out-stock' : ''}" href="${escapeHtml(href)}" aria-label="View ${escapeHtml(title)} offer">
+    <div class="offer-item-media shimmer"><img loading="lazy" decoding="async" src="${optimizeImageUrl(image, 520)}" onload="this.parentElement.classList.remove('shimmer')" onerror="this.src=SITE_CONFIG.defaultCategoryImage" alt="${escapeHtml(title)}"></div>
+    <div class="offer-item-copy">
+      <div class="offer-item-badges"><span>Offer</span>${discount > 0 ? `<em>${Math.round(discount)}% off</em>` : ''}${unavailable ? '<em class="offer-item-stock">Out of stock</em>' : ''}</div>
+      <h3>${escapeHtml(title)}</h3>
+      <div class="offer-item-price">${referencePrice > offerPrice && offerPrice ? `<del>₹${referencePrice.toLocaleString('en-IN')}</del>` : ''}<strong>${offerPrice ? `₹${offerPrice.toLocaleString('en-IN')}` : 'View offer'}</strong></div>
+      ${expiry ? `<small>${escapeHtml(expiry)}</small>` : ''}
+      <b class="offer-item-link">View item <span aria-hidden="true">→</span></b>
+    </div>
+  </a>`;
+}
+function closeCustomerBarcodeScanner(){
+  if(customerBarcodeScanTimer){ clearTimeout(customerBarcodeScanTimer); customerBarcodeScanTimer = null; }
+  if(customerBarcodeStream){ customerBarcodeStream.getTracks().forEach(track => track.stop()); customerBarcodeStream = null; }
+  customerBarcodeDetector = null;
+  const video = document.getElementById('customerBarcodeVideo');
+  if(video){ try{ video.pause(); }catch(_error){} video.srcObject = null; }
+  document.getElementById('customerBarcodeScanner')?.remove();
+  document.documentElement.classList.remove('barcode-scanner-open');
+}
+async function useCustomerBarcode(code){
+  const value = cleanText(code);
+  if(!value) return;
+  const message = document.getElementById('customerBarcodeMessage');
+  if(message) message.textContent = 'Finding product…';
+  try{
+    const product = await findProductByBarcode(value);
+    if(product && product.id){
+      const params = new URLSearchParams();
+      if(product.category) params.set('cat', product.category);
+      params.set('id', product.id);
+      closeCustomerBarcodeScanner();
+      location.href = `product.html?${params.toString()}`;
+      return;
+    }
+    if(message) message.textContent = 'No available product was found for this code.';
+    document.getElementById('customerBarcodeManual')?.focus();
+  }catch(_error){
+    if(message) message.textContent = 'Could not check this code. Check your connection and try again.';
+  }
+}
+async function customerBarcodeDetectLoop(){
+  const video = document.getElementById('customerBarcodeVideo');
+  if(!video || !customerBarcodeStream || !customerBarcodeDetector) return;
+  try{
+    if(video.readyState >= 2){
+      const codes = await customerBarcodeDetector.detect(video);
+      const value = cleanText(codes && codes[0] && codes[0].rawValue);
+      if(value){ await useCustomerBarcode(value); return; }
+    }
+  }catch(_error){}
+  customerBarcodeScanTimer = setTimeout(customerBarcodeDetectLoop, 180);
+}
+async function startCustomerBarcodeScanner(){
+  closeCustomerBarcodeScanner();
+  document.body.insertAdjacentHTML('beforeend', `<div id="customerBarcodeScanner" class="customer-barcode-scanner" role="dialog" aria-modal="true" aria-labelledby="customerBarcodeTitle" onclick="if(event.target===this) closeCustomerBarcodeScanner()">
+    <div class="customer-barcode-card">
+      <div class="customer-barcode-head"><div><b id="customerBarcodeTitle">Scan product code</b><small>Point your camera at the product barcode, or enter the code below.</small></div><button type="button" onclick="closeCustomerBarcodeScanner()" aria-label="Close scanner">×</button></div>
+      <div class="customer-barcode-video-wrap"><video id="customerBarcodeVideo" playsinline muted></video><span class="customer-barcode-line" aria-hidden="true"></span><p id="customerBarcodeMessage">Starting scanner…</p></div>
+      <form class="customer-barcode-manual" onsubmit="event.preventDefault();useCustomerBarcode(document.getElementById('customerBarcodeManual').value)"><input id="customerBarcodeManual" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Enter or scan code"><button type="submit">Find item</button></form>
+    </div>
+  </div>`);
+  document.documentElement.classList.add('barcode-scanner-open');
+  const message = document.getElementById('customerBarcodeMessage');
+  const manual = document.getElementById('customerBarcodeManual');
+  if(!('BarcodeDetector' in window) || !navigator.mediaDevices?.getUserMedia){
+    if(message) message.textContent = 'Camera barcode scanning is not supported here. Enter the code below or use a hardware scanner.';
+    manual?.focus();
+    return;
+  }
+  try{
+    customerBarcodeDetector = new BarcodeDetector();
+    customerBarcodeStream = await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}}, audio:false});
+    const video = document.getElementById('customerBarcodeVideo');
+    if(!video){ closeCustomerBarcodeScanner(); return; }
+    video.srcObject = customerBarcodeStream;
+    await video.play();
+    if(message) message.textContent = 'Align the barcode inside the camera area.';
+    customerBarcodeDetectLoop();
+  }catch(_error){
+    if(message) message.textContent = 'Camera is unavailable. Enter the code below or use a hardware scanner.';
+    manual?.focus();
+  }
 }
 function bindOfferDots(slider, dots){
   if(!slider || !dots) return;
@@ -491,6 +604,7 @@ async function initHome(){
   updateCartCount();
   let renderedCategories = [];
   let renderedOffers = [];
+  let renderedOfferItems = [];
   const holder = document.getElementById('homeCategories');
   if(holder) holder.innerHTML = skeletonCards(8);
   initSearchForm('homeSearchForm','homeSearchInput', q => `catalog.html${q ? '?q=' + encodeURIComponent(q) : ''}`);
@@ -520,11 +634,22 @@ async function initHome(){
     dots.classList.toggle('hidden', offers.length <= 1);
     bindOfferDots(slider, dots);
   };
-  const [categories, offers] = await Promise.all([loadCategories(false), loadOffers(false)]);
+  const renderOfferItems = items => {
+    renderedOfferItems = items || [];
+    const section = document.getElementById('offerItemsSection');
+    const grid = document.getElementById('offerItemsGrid');
+    if(!section || !grid) return;
+    if(!items || !items.length){ section.classList.add('hidden'); grid.innerHTML = ''; return; }
+    section.classList.remove('hidden');
+    grid.innerHTML = items.map(offerItemCard).join('');
+  };
+  const [categories, offers, offerItems] = await Promise.all([loadCategories(false), loadOffers(false), loadOfferItems(false).catch(()=>[])]);
   renderOffers(offers);
+  renderOfferItems(offerItems);
   renderCategories(categories);
   categories.slice(0,8).forEach(c => preloadImage(c.image));
   offers.slice(0,4).forEach(o => preloadImage(o.image));
+  offerItems.slice(0,6).forEach(item => preloadImage(item.image));
   if(typeof subscribeToStoreUpdates === 'function' && !window.__welloneHomeLiveBound){
     window.__welloneHomeLiveBound = true;
     let homeRefreshTimer = null;
@@ -539,6 +664,9 @@ async function initHome(){
         }
         if(isBroad || has('offer_slides')){
           loadOffers(true).then(fresh => { if(!isSameData(renderedOffers, fresh)) renderOffers(fresh); }).catch(()=>{});
+        }
+        if(isBroad || has('offer_items')){
+          loadOfferItems(true).then(fresh => { if(!isSameData(renderedOfferItems, fresh)) renderOfferItems(fresh); }).catch(()=>{});
         }
       }, 180);
     });
@@ -1177,27 +1305,52 @@ function policyIconSvg(type){
   };
   return `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">${icons[type] || icons.secure}</svg>`;
 }
-function variantIsAvailable(variant){
-  return !variant || cleanText(variant.stockStatus || variant.stock_status || 'in_stock') !== 'out_of_stock';
+function selectedStockQuantity(product, variant = null){
+  if(!product || product.TrackInventory !== true) return null;
+  if(variant){
+    const source = cleanText(variant.inventorySource || '');
+    if(source === 'variant' || source === 'synthetic') return Math.max(0, Number(variant.stock || 0) || 0);
+    if(source === 'product') return Math.max(0, Number(product.StockQuantity || 0) || 0);
+    if(Object.prototype.hasOwnProperty.call(variant, 'stock')) return Math.max(0, Number(variant.stock || 0) || 0);
+  }
+  return Math.max(0, Number(product.StockQuantity || 0) || 0);
+}
+function variantIsAvailable(variant, product = activeProduct){
+  if(!variant) return true;
+  if(cleanText(variant.stockStatus || variant.stock_status || 'in_stock') === 'out_of_stock') return false;
+  const stock = selectedStockQuantity(product, variant);
+  return stock === null || stock > 0;
+}
+function variantAvailabilityLabel(product, variant){
+  if(!variantIsAvailable(variant, product)) return 'Out of stock';
+  const stock = selectedStockQuantity(product, variant);
+  if(stock === null) return '';
+  return `${stock} available`;
 }
 function firstAvailableVariantIndex(product){
   const variants = Array.isArray(product && product.Variants) ? product.Variants : [];
-  const index = variants.findIndex(variantIsAvailable);
+  const index = variants.findIndex(variant => variantIsAvailable(variant, product));
   return index >= 0 ? index : 0;
 }
 function productIsAvailable(product, variant = null){
   if(!product || cleanText(product.Status || 'active') !== 'active' || cleanText(product.StockStatus || 'in_stock') === 'out_of_stock') return false;
-  if(variant && !variantIsAvailable(variant)) return false;
+  if(product.TrackInventory === true && Number(product.StockQuantity || 0) <= 0) return false;
+  if(variant && !variantIsAvailable(variant, product)) return false;
   const variants = Array.isArray(product.Variants) ? product.Variants : [];
-  return !variants.length || variants.some(variantIsAvailable);
+  return !variants.length || variants.some(item => variantIsAvailable(item, product));
 }
 function productStockNote(product, variant = null){
-  if(productIsAvailable(product, variant)) return '';
-  if(product && cleanText(product.StockStatus || 'in_stock') !== 'out_of_stock' && variant && !variantIsAvailable(variant)){
-    const label = cleanText(variant.color || variant.label || 'Selected option');
-    return `<div class="stock-alert">${escapeHtml(label)} is currently out of stock. Choose another available option.</div>`;
+  if(!productIsAvailable(product, variant)){
+    if(product && cleanText(product.StockStatus || 'in_stock') !== 'out_of_stock' && variant && !variantIsAvailable(variant, product)){
+      const label = cleanText(variant.color || variant.label || 'Selected option');
+      return `<div class="stock-alert">${escapeHtml(label)} is currently out of stock. Choose another available option.</div>`;
+    }
+    return '<div class="stock-alert">Currently out of stock. Contact the shop to check availability.</div>';
   }
-  return '<div class="stock-alert">Currently out of stock. Contact the shop to check availability.</div>';
+  const stock = selectedStockQuantity(product, variant);
+  if(stock === null) return '';
+  const label = stock === 1 ? 'Only 1 unit available.' : `${stock} units available.`;
+  return `<div class="stock-availability-note">${label}</div>`;
 }
 function productGalleryImages(product, variant){
   const list = [];
@@ -1266,8 +1419,8 @@ function renderProductDetail(){
       ${product.Description ? `<p class="muted detail-description">${escapeHtml(product.Description)}</p>` : ''}
       ${priceHtml(product, variant)}
       <div class="detail-option-card">
-        ${colorMode ? `<div class="option-block"><b>Choose colour</b><div class="color-variant-options">${product.Variants.map((v,i)=>{ const available = variantIsAvailable(v); return `<button class="color-variant-choice ${i===activeVariantIndex?'active':''} ${available?'':'is-out-stock'}" type="button" onclick="selectColorVariant(${i})" aria-pressed="${i===activeVariantIndex?'true':'false'}" ${available?'':`title="View and share this out-of-stock colour"`}><span>${escapeHtml(v.color || v.label || 'Colour')}</span>${available?'':'<small class="variant-stock-label">Out of stock</small>'}</button>`; }).join('')}</div></div>` : ''}
-        ${hasVariants ? `<div class="option-block"><b>Choose ${escapeHtml(optionTitle)}</b><div class="size-variant-options option-variant-options">${product.Variants.map((v,i)=>{ const available = variantIsAvailable(v); return `<button class="size-variant-choice ${i===activeVariantIndex?'active':''} ${available?'':'is-out-stock'}" type="button" onclick="selectVariant(${i})" ${available?'':`title="View and share this out-of-stock option"`}><span>${escapeHtml(v.label || 'Standard')}</span>${available?'':'<small class="variant-stock-label">Out of stock</small>'}</button>`; }).join('')}</div></div>` : ''}
+        ${colorMode ? `<div class="option-block"><b>Choose colour</b><div class="color-variant-options">${product.Variants.map((v,i)=>{ const available = variantIsAvailable(v, product); const stockLabel = variantAvailabilityLabel(product, v); return `<button class="color-variant-choice ${i===activeVariantIndex?'active':''} ${available?'':'is-out-stock'}" type="button" onclick="selectColorVariant(${i})" aria-pressed="${i===activeVariantIndex?'true':'false'}" ${available?'':`title="View and share this out-of-stock colour"`}><span>${escapeHtml(v.color || v.label || 'Colour')}</span>${stockLabel?`<small class="variant-stock-label ${available?'is-available':''}">${escapeHtml(stockLabel)}</small>`:''}</button>`; }).join('')}</div></div>` : ''}
+        ${hasVariants ? `<div class="option-block"><b>Choose ${escapeHtml(optionTitle)}</b><div class="size-variant-options option-variant-options">${product.Variants.map((v,i)=>{ const available = variantIsAvailable(v, product); const stockLabel = variantAvailabilityLabel(product, v); return `<button class="size-variant-choice ${i===activeVariantIndex?'active':''} ${available?'':'is-out-stock'}" type="button" onclick="selectVariant(${i})" ${available?'':`title="View and share this out-of-stock option"`}><span>${escapeHtml(v.label || 'Standard')}</span>${stockLabel?`<small class="variant-stock-label ${available?'is-available':''}">${escapeHtml(stockLabel)}</small>`:''}</button>`; }).join('')}</div></div>` : ''}
         ${colorMode && hasVisibleSizes(product, variant) ? `<div class="option-block"><b>Choose size</b><div class="size-variant-options">${sizeOptions.map((size,i)=>`<button class="size-variant-choice ${i===activeSizeIndex?'active':''}" type="button" onclick="selectSizeOption(${i})">${escapeHtml(size)}</button>`).join('')}</div></div>` : ''}
         ${!colorMode && colors.length ? `<div class="option-block"><b>Choose colour</b><div id="colorOptions" class="color-variant-options">${colors.map((c,i)=>`<button class="color-variant-choice ${i===activeColorIndex?'active':''}" type="button" onclick="activateColorChoice(this,${i})" aria-pressed="${i===activeColorIndex?'true':'false'}"><span>${escapeHtml(c)}</span></button>`).join('')}</div></div>` : ''}
         <div class="option-block"><b>Quantity</b><div class="qty"><button type="button" onclick="changeQty(-1)">−</button><span id="qty">1</span><button type="button" onclick="changeQty(1)">+</button></div></div>
@@ -1466,7 +1619,15 @@ function activateColorChoice(button, index = 0){
 }
 function changeQty(amount){
   const qty = document.getElementById('qty');
-  if(qty) qty.textContent = Math.max(1, Number(qty.textContent || 1) + amount);
+  if(!qty) return;
+  const current = Math.max(1, Number(qty.textContent || 1));
+  let next = Math.max(1, current + Number(amount || 0));
+  const stock = selectedStockQuantity(activeProduct, selectedProductVariant(activeProduct));
+  if(stock !== null && next > stock){
+    next = Math.max(1, stock);
+    if(Number(amount || 0) > 0) showSoftToast(stock === 1 ? 'Only 1 unit is available' : `Only ${stock} units are available`);
+  }
+  qty.textContent = String(next);
 }
 function handleAddToCart(){
   const product = activeProduct;
@@ -1489,7 +1650,9 @@ function handleAddToCart(){
     mrp: variant.mrp || product.MRP,
     subcategory: product.Subcategory,
     terms: selectedPolicyTerms(product.Terms).map(term => term.label),
-    stockStatus: variant.stockStatus || product.StockStatus || 'in_stock'
+    stockStatus: variant.stockStatus || product.StockStatus || 'in_stock',
+    trackInventory: product.TrackInventory === true,
+    stockQuantity: selectedStockQuantity(product, variant)
   });
 }
 function shareProductLink(){
@@ -1503,6 +1666,9 @@ function shareProductLink(){
   }
   navigator.clipboard?.writeText(url).then(() => showSoftToast('Selected option link copied')).catch(() => { prompt('Copy selected option link', url); });
 }
+window.addEventListener('pagehide', closeCustomerBarcodeScanner);
+document.addEventListener('keydown', event => { if(event.key === 'Escape' && document.getElementById('customerBarcodeScanner')) closeCustomerBarcodeScanner(); });
+
 function initCartPage(){
   if(window.WelloneCart && typeof WelloneCart.renderCartItems === 'function') WelloneCart.renderCartItems();
   else renderCartItems();

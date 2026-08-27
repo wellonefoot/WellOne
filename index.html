@@ -37,7 +37,7 @@
     })();
   </script>
   
-  <link rel="stylesheet" href="css/style.css?v=74">
+  <link rel="stylesheet" href="css/style.css?v=76">
   <link rel="icon" href="./assets/favicon/favicon.ico" type="image/x-icon">
   <link rel="apple-touch-icon" href="./assets/favicon/apple-icon-180x180.png">
   <link rel="manifest" href="manifest.webmanifest">
@@ -71,7 +71,8 @@
     <h1 id="siteSeoHeading" class="sr-only">Wellone Fancy & Footwear in Edavannappara</h1>
     <section class="quick-shop compact-search-card pattern-card" aria-label="Search products">
       <form id="homeSearchForm" class="search-bar compact-search" action="catalog.html">
-        <input id="homeSearchInput" name="q" type="search" placeholder="Search for products..." autocomplete="off">
+        <input id="homeSearchInput" name="q" type="search" placeholder="Search products or scan a code..." autocomplete="off">
+        <button class="barcode-search-btn" type="button" onclick="startCustomerBarcodeScanner()" aria-label="Scan product barcode" title="Scan product barcode"><span aria-hidden="true"></span></button>
         <button class="search-icon-btn" type="submit" aria-label="Search">⌕</button>
       </form>
     </section>
@@ -80,6 +81,11 @@
     <section id="offerSection" class="offer-section hidden" aria-label="Discount offers">
       <div class="section-title-row compact"><div><p class="tag">today's deals</p><h1>Discount picks</h1></div><a class="mini-link" href="catalog.html">View all</a></div>
       <div id="offerSlider" class="offer-slider"></div>
+    </section>
+
+    <section id="offerItemsSection" class="offer-items-section hidden" aria-label="Offer items">
+      <div class="section-title-row compact"><div><p class="tag">special prices</p><h2>Offer items</h2></div><a class="mini-link" href="catalog.html">Browse products</a></div>
+      <div id="offerItemsGrid" class="offer-items-grid"></div>
     </section>
 
     <section class="section categories-only">
@@ -138,11 +144,11 @@
   <a class="floating-cart" href="cart.html" aria-label="Open cart">Cart <b id="floatCartCount">0</b></a>
   <footer>© 2026 Wellone Fancy & Footwear. All rights reserved.</footer>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="js/config.js?v=74"></script>
-  <script src="js/cart.js?v=75"></script>
-  <script src="js/supabase-data.js?v=74"></script>
-  <script src="js/app.js?v=74"></script>
+  <script src="js/config.js?v=76"></script>
+  <script src="js/cart.js?v=76"></script>
+  <script src="js/supabase-data.js?v=76"></script>
+  <script src="js/app.js?v=76"></script>
   <script>initHome();</script>
-  <script src="js/pwa-install.js?v=74"></script>
+  <script src="js/pwa-install.js?v=76"></script>
 </body>
 </html>
