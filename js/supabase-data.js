@@ -156,9 +156,11 @@ function normalizeOfferItems(data, productMap = new Map()){
   const current = Date.now();
   return (data || []).map((o,i) => {
     const link = cleanText(o.item_link || 'catalog.html');
-    const product = productMap.get(offerLinkedProductId(link)) || null;
+    const linkedProductId = offerLinkedProductId(link);
+    const product = productMap.get(linkedProductId) || null;
     const validUntil = cleanText(o.valid_until || '');
     const validTime = validUntil ? new Date(validUntil).getTime() : 0;
+    const expired = Boolean(validTime && validTime <= current);
     return {
       id: cleanText(o.id || `offer-item-${i+1}`),
       title: cleanText(o.title || (product && product.name) || 'Special offer'),
@@ -166,8 +168,9 @@ function normalizeOfferItems(data, productMap = new Map()){
       offerPrice: dbPrice(o.offer_price),
       discount: o.discount_percentage === null || o.discount_percentage === undefined ? '' : cleanText(o.discount_percentage),
       validUntil,
-      active: o.is_active !== false && (!validTime || validTime > current),
-      productId: cleanText(product && product.id),
+      active: o.is_active !== false,
+      expired,
+      productId: cleanText(linkedProductId),
       productName: cleanText(product && product.name),
       image: optimizeImageUrl(cleanText(product && product.main_image_url), 620),
       mrp: dbPrice(product && product.mrp),
@@ -553,8 +556,7 @@ async function loadOfferItems(forceRefresh = false){
     .select('id,title,item_link,offer_price,discount_percentage,valid_until,is_active,sort_order,created_at')
     .eq('is_active', true)
     .order('sort_order', {ascending:true})
-    .order('created_at', {ascending:false})
-    .limit(36);
+    .order('created_at', {ascending:false});
   if(error){
     if(error.code === '42P01' || /relation .*offer_items.*does not exist/i.test(cleanText(error.message))){
       offerItemsCache = [];
@@ -563,7 +565,7 @@ async function loadOfferItems(forceRefresh = false){
     throw error;
   }
   const rows = data || [];
-  const productIds = uniqueClean(rows.map(row => offerLinkedProductId(row.item_link))).slice(0, 36);
+  const productIds = uniqueClean(rows.map(row => offerLinkedProductId(row.item_link)));
   const productMap = new Map();
   if(productIds.length){
     const {data:products, error:productError} = await supabaseClient()

@@ -1,9 +1,9 @@
-const CACHE_VERSION = 'wellone-customer-v77-inventory-offers';
+const CACHE_VERSION = 'wellone-customer-v78-offers-page';
 const SHELL_CACHE = `${CACHE_VERSION}-shell`;
 const RUNTIME_CACHE = `${CACHE_VERSION}-runtime`;
 const SHELL_ASSETS = [
-  './', './index.html', './catalog.html', './product.html', './cart.html', './about.html', './contact.html',
-  './css/style.css?v=76', './js/config.js?v=76', './js/cart.js?v=76', './js/supabase-data.js?v=76', './js/app.js?v=76', './js/pwa-install.js?v=76',
+  './', './index.html', './offers.html', './catalog.html', './product.html', './cart.html', './about.html', './contact.html',
+  './css/style.css?v=78', './js/config.js?v=78', './js/cart.js?v=78', './js/supabase-data.js?v=78', './js/app.js?v=78', './js/pwa-install.js?v=78',
   './manifest.webmanifest', './assets/logo.png?v=74', './assets/favicon/favicon.ico',
   './assets/favicon/wellone-icon-192-v46.png', './assets/favicon/wellone-icon-512-v46.png',
   './assets/favicon/wellone-icon-192-maskable-v46.png', './assets/favicon/wellone-icon-512-maskable-v46.png'

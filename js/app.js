@@ -11,6 +11,11 @@ const SORT_OPTIONS = [
 ];
 let catalogState = {category:'', query:'', subcategory:'', sort:'newest', offset:0, loading:false, nextOffset:null, products:[], global:false};
 let activeProduct = null;
+let activeOfferItem = null;
+let activeOfferNotice = '';
+let activeOfferNoticeTitle = 'Offer unavailable';
+let activeOfferExpiryTimer = null;
+let offersPageExpiryTimer = null;
 let activeVariantIndex = 0;
 let activeSizeIndex = 0;
 let activeColorIndex = 0;
@@ -350,32 +355,184 @@ function safeStoreLink(value, fallback = 'catalog.html'){
     return /^[a-z][a-z0-9+.-]*:/i.test(raw) ? url.href : raw;
   }catch(_error){ return fallback; }
 }
+function offerItemExpiryTime(value){
+  const text = cleanText(value);
+  if(!text) return 0;
+  const date = new Date(text);
+  return Number.isFinite(date.getTime()) ? date.getTime() : 0;
+}
+function offerItemIsExpired(item){
+  const time = offerItemExpiryTime(item && item.validUntil);
+  return Boolean((item && item.expired === true) || (time && time <= Date.now()));
+}
+function offerItemIsLive(item){
+  return !!item && item.active !== false && !offerItemIsExpired(item) && money(item.offerPrice) > 0;
+}
 function offerItemExpiryLabel(value){
   const text = cleanText(value);
   if(!text) return '';
   const date = new Date(text);
   if(!Number.isFinite(date.getTime())) return '';
-  return `Valid until ${date.toLocaleDateString('en-IN', {day:'numeric', month:'short', year:'numeric'})}`;
+  return `Valid until ${date.toLocaleString('en-IN', {day:'numeric', month:'short', year:'numeric', hour:'numeric', minute:'2-digit'})}`;
+}
+function offerItemProductLink(item, includeOffer = true){
+  const raw = safeStoreLink(item && item.link || 'catalog.html');
+  if(!includeOffer || !offerItemIsLive(item) || !cleanText(item && item.id)) return raw;
+  const joiner = raw.includes('?') ? '&' : '?';
+  return `${raw}${joiner}offer=${encodeURIComponent(item.id)}`;
+}
+function offerItemRegularPrice(item){
+  return money(item && item.productPrice) || money(item && item.mrp);
+}
+function formatMoneyNumber(value){
+  const n = money(value);
+  return n ? `₹${n.toLocaleString('en-IN')}` : '';
 }
 function offerItemCard(item){
-  const href = safeStoreLink(item.link || 'catalog.html');
+  const expired = offerItemIsExpired(item);
+  const href = offerItemProductLink(item, !expired);
   const title = item.title || item.productName || 'Special offer';
   const image = item.image || SITE_CONFIG.defaultCategoryImage;
   const offerPrice = money(item.offerPrice);
-  const referencePrice = Math.max(money(item.mrp), money(item.productPrice));
+  const regularPrice = offerItemRegularPrice(item);
   const discount = Number(item.discount || 0);
   const expiry = offerItemExpiryLabel(item.validUntil);
   const unavailable = cleanText(item.stockStatus || 'in_stock') === 'out_of_stock' || (item.trackInventory === true && Number(item.stockQuantity || 0) <= 0);
-  return `<a class="offer-item-card ${unavailable ? 'is-out-stock' : ''}" href="${escapeHtml(href)}" aria-label="View ${escapeHtml(title)} offer">
-    <div class="offer-item-media shimmer"><img loading="lazy" decoding="async" src="${optimizeImageUrl(image, 520)}" onload="this.parentElement.classList.remove('shimmer')" onerror="this.src=SITE_CONFIG.defaultCategoryImage" alt="${escapeHtml(title)}"></div>
+  const classes = ['offer-item-card'];
+  if(unavailable) classes.push('is-out-stock');
+  if(expired) classes.push('is-expired');
+  const pricing = expired
+    ? `<div class="offer-item-price expired-price">${regularPrice ? `<strong>${formatMoneyNumber(regularPrice)}</strong>` : '<strong>View current price</strong>'}</div>`
+    : `<div class="offer-item-price live-offer-price">${regularPrice && regularPrice !== offerPrice ? `<del>${formatMoneyNumber(regularPrice)}</del>` : ''}<strong>${offerPrice ? formatMoneyNumber(offerPrice) : 'View offer'}</strong></div>`;
+  const status = expired
+    ? `<div class="offer-expired-warning"><b>Offer expired</b><span>Regular product price now applies.</span></div>`
+    : `${expiry ? `<small>${escapeHtml(expiry)}</small>` : ''}`;
+  const cta = expired ? 'View product at regular price' : 'Get this offer';
+  return `<a class="${classes.join(' ')}" href="${escapeHtml(href)}" aria-label="${expired ? 'Offer expired. View' : 'View offer for'} ${escapeHtml(title)}">
+    <div class="offer-item-media shimmer"><img loading="lazy" decoding="async" src="${optimizeImageUrl(image, 620)}" onload="this.parentElement.classList.remove('shimmer')" onerror="this.src=SITE_CONFIG.defaultCategoryImage" alt="${escapeHtml(title)}"></div>
     <div class="offer-item-copy">
-      <div class="offer-item-badges"><span>Offer</span>${discount > 0 ? `<em>${Math.round(discount)}% off</em>` : ''}${unavailable ? '<em class="offer-item-stock">Out of stock</em>' : ''}</div>
+      <div class="offer-item-badges">${expired ? '<span class="offer-expired-badge">Expired</span>' : '<span>Offer</span>'}${!expired && discount > 0 ? `<em>${Math.round(discount)}% off</em>` : ''}${unavailable ? '<em class="offer-item-stock">Out of stock</em>' : ''}</div>
       <h3>${escapeHtml(title)}</h3>
-      <div class="offer-item-price">${referencePrice > offerPrice && offerPrice ? `<del>₹${referencePrice.toLocaleString('en-IN')}</del>` : ''}<strong>${offerPrice ? `₹${offerPrice.toLocaleString('en-IN')}` : 'View offer'}</strong></div>
-      ${expiry ? `<small>${escapeHtml(expiry)}</small>` : ''}
-      <b class="offer-item-link">View item <span aria-hidden="true">→</span></b>
+      ${pricing}
+      ${status}
+      <b class="offer-item-link">${escapeHtml(cta)} <span aria-hidden="true">→</span></b>
     </div>
   </a>`;
+}
+function productOfferPriceHtml(product, variant){
+  if(!offerItemIsLive(activeOfferItem)) return priceHtml(product, variant);
+  const regular = money((variant && variant.price) || product.Price || product.price) || money((variant && variant.mrp) || product.MRP || product.mrp);
+  const offerPrice = money(activeOfferItem.offerPrice);
+  const expiry = offerItemExpiryLabel(activeOfferItem.validUntil);
+  return `<div class="price-row product-live-offer-price">${regular && regular !== offerPrice ? `<del>${formatMoneyNumber(regular)}</del>` : ''}<strong>${formatMoneyNumber(offerPrice)}</strong><em>Offer price</em></div>${expiry ? `<div class="product-offer-validity">${escapeHtml(expiry)}</div>` : ''}`;
+}
+function productOfferNoticeHtml(){
+  if(!activeOfferNotice) return '';
+  return `<div class="product-offer-expired-notice"><b>${escapeHtml(activeOfferNoticeTitle || 'Offer unavailable')}</b><span>${escapeHtml(activeOfferNotice)}</span></div>`;
+}
+function scheduleActiveOfferExpiryRefresh(){
+  clearTimeout(activeOfferExpiryTimer);
+  activeOfferExpiryTimer = null;
+  if(!offerItemIsLive(activeOfferItem)) return;
+  const expiry = offerItemExpiryTime(activeOfferItem.validUntil);
+  if(!expiry) return;
+  const delay = expiry - Date.now() + 120;
+  if(delay <= 0){
+    activeOfferNoticeTitle = 'Offer expired';
+    activeOfferNotice = 'This promotion has ended. You can still order this item at its current regular price.';
+    activeOfferItem = null;
+    renderProductDetail();
+    return;
+  }
+  activeOfferExpiryTimer = setTimeout(() => {
+    if(!activeOfferItem) return;
+    activeOfferNoticeTitle = 'Offer expired';
+    activeOfferNotice = 'This promotion has ended. You can still order this item at its current regular price.';
+    activeOfferItem = null;
+    renderProductDetail();
+  }, Math.min(delay, 2147483000));
+}
+function scheduleOffersPageExpiryRefresh(items){
+  clearTimeout(offersPageExpiryTimer);
+  offersPageExpiryTimer = null;
+  const future = (items || []).map(item => offerItemExpiryTime(item.validUntil)).filter(time => time > Date.now()).sort((a,b)=>a-b);
+  if(!future.length) return;
+  const delay = future[0] - Date.now() + 150;
+  offersPageExpiryTimer = setTimeout(() => initOffersPage(), Math.min(Math.max(120, delay), 2147483000));
+}
+async function resolveProductOffer(params, product){
+  clearTimeout(activeOfferExpiryTimer);
+  activeOfferExpiryTimer = null;
+  activeOfferItem = null;
+  activeOfferNotice = '';
+  activeOfferNoticeTitle = 'Offer unavailable';
+  const offerId = cleanText(params && params.get('offer'));
+  if(!offerId || !product) return null;
+  try{
+    const items = await loadOfferItems(true);
+    const item = (items || []).find(candidate => cleanText(candidate.id) === offerId) || null;
+    if(!item){
+      activeOfferNotice = 'This offer is no longer available. The current regular product price applies.';
+      return null;
+    }
+    if(cleanText(item.productId) && cleanText(item.productId) !== cleanText(product.ID)){
+      activeOfferNotice = 'This offer does not apply to this product. The current regular product price applies.';
+      return null;
+    }
+    if(offerItemIsExpired(item)){
+      activeOfferNoticeTitle = 'Offer expired';
+      activeOfferNotice = 'This promotion has ended. You can still order this item at its current regular price.';
+      return null;
+    }
+    if(!offerItemIsLive(item)){
+      activeOfferNotice = 'This offer is not available now. The current regular product price applies.';
+      return null;
+    }
+    activeOfferItem = item;
+    scheduleActiveOfferExpiryRefresh();
+    return item;
+  }catch(_error){
+    activeOfferNoticeTitle = 'Offer verification unavailable';
+    activeOfferNotice = 'The offer could not be verified right now. The regular product price is shown for safety.';
+    return null;
+  }
+}
+let offersPageRefreshRunning = false;
+async function initOffersPage(){
+  if(offersPageRefreshRunning) return;
+  offersPageRefreshRunning = true;
+  updateCartCount();
+  const grid = document.getElementById('offersPageGrid');
+  const empty = document.getElementById('offersPageEmpty');
+  if(!grid){ offersPageRefreshRunning = false; return; }
+  if(!grid.dataset.loaded) grid.innerHTML = skeletonCards(8, 'offer-item-skeleton');
+  try{
+    const items = await loadOfferItems(true);
+    const ordered = (items || []).slice().sort((a,b) => Number(offerItemIsExpired(a)) - Number(offerItemIsExpired(b)));
+    grid.innerHTML = ordered.map(offerItemCard).join('');
+    grid.dataset.loaded = 'true';
+    if(empty) empty.classList.toggle('hidden', ordered.length > 0);
+    ordered.slice(0,8).forEach(item => preloadImage(item.image));
+    scheduleOffersPageExpiryRefresh(ordered);
+  }catch(_error){
+    grid.innerHTML = '';
+    if(empty){
+      empty.classList.remove('hidden');
+      empty.innerHTML = '<h2>Offers are unavailable right now</h2><p>Please try again shortly or continue shopping from the catalog.</p><a class="btn primary" href="catalog.html">Browse products</a>';
+    }
+  }finally{
+    offersPageRefreshRunning = false;
+  }
+  if(typeof subscribeToStoreUpdates === 'function' && !window.__welloneOffersLiveBound){
+    window.__welloneOffersLiveBound = true;
+    let timer = null;
+    subscribeToStoreUpdates(change => {
+      const tables = Array.isArray(change && change.tables) ? change.tables.map(cleanText) : [cleanText(change && change.table)].filter(Boolean);
+      if(tables.length && !tables.some(table => ['offer_items','products','product_variants'].includes(table))) return;
+      clearTimeout(timer);
+      timer = setTimeout(() => initOffersPage(), 160);
+    });
+  }
 }
 function bindOfferDots(slider, dots){
   if(!slider || !dots) return;
@@ -528,7 +685,6 @@ async function initHome(){
   updateCartCount();
   let renderedCategories = [];
   let renderedOffers = [];
-  let renderedOfferItems = [];
   const holder = document.getElementById('homeCategories');
   if(holder) holder.innerHTML = skeletonCards(8);
   initSearchForm('homeSearchForm','homeSearchInput', q => `catalog.html${q ? '?q=' + encodeURIComponent(q) : ''}`);
@@ -558,22 +714,11 @@ async function initHome(){
     dots.classList.toggle('hidden', offers.length <= 1);
     bindOfferDots(slider, dots);
   };
-  const renderOfferItems = items => {
-    renderedOfferItems = items || [];
-    const section = document.getElementById('offerItemsSection');
-    const grid = document.getElementById('offerItemsGrid');
-    if(!section || !grid) return;
-    if(!items || !items.length){ section.classList.add('hidden'); grid.innerHTML = ''; return; }
-    section.classList.remove('hidden');
-    grid.innerHTML = items.map(offerItemCard).join('');
-  };
-  const [categories, offers, offerItems] = await Promise.all([loadCategories(false), loadOffers(false), loadOfferItems(false).catch(()=>[])]);
+  const [categories, offers] = await Promise.all([loadCategories(false), loadOffers(false)]);
   renderOffers(offers);
-  renderOfferItems(offerItems);
   renderCategories(categories);
   categories.slice(0,8).forEach(c => preloadImage(c.image));
   offers.slice(0,4).forEach(o => preloadImage(o.image));
-  offerItems.slice(0,6).forEach(item => preloadImage(item.image));
   if(typeof subscribeToStoreUpdates === 'function' && !window.__welloneHomeLiveBound){
     window.__welloneHomeLiveBound = true;
     let homeRefreshTimer = null;
@@ -588,9 +733,6 @@ async function initHome(){
         }
         if(isBroad || has('offer_slides')){
           loadOffers(true).then(fresh => { if(!isSameData(renderedOffers, fresh)) renderOffers(fresh); }).catch(()=>{});
-        }
-        if(isBroad || has('offer_items')){
-          loadOfferItems(true).then(fresh => { if(!isSameData(renderedOfferItems, fresh)) renderOfferItems(fresh); }).catch(()=>{});
         }
       }, 180);
     });
@@ -1002,6 +1144,7 @@ async function initProduct(){
   activeColorIndex = 0;
   activeImageIndex = 0;
   applyProductSelectionFromUrl(product, params);
+  await resolveProductOffer(params, product);
   renderProductDetail();
   bindProductLiveUpdates(categoryName, productId);
 }
@@ -1011,7 +1154,7 @@ function bindProductLiveUpdates(categoryName, productId){
   window.__welloneProductLiveBound = true;
   subscribeToStoreUpdates(change => {
     const tables = Array.isArray(change && change.tables) ? change.tables.map(cleanText) : [cleanText(change && change.table)].filter(Boolean);
-    const relevant = !tables.length || tables.some(table => ['products','product_variants','product_images','categories','subcategories'].includes(table));
+    const relevant = !tables.length || tables.some(table => ['products','product_variants','product_images','categories','subcategories','offer_items'].includes(table));
     if(!relevant) return;
     clearTimeout(productLiveRefreshTimer);
     productLiveRefreshTimer = setTimeout(async () => {
@@ -1022,10 +1165,12 @@ function bindProductLiveUpdates(categoryName, productId){
           if(holder) holder.innerHTML = `<div class="empty-card"><h2>Product not found</h2><p>This item is no longer available.</p></div>`;
           return;
         }
-        if(isSameData(activeProduct, fresh)) return;
+        const offerChanged = tables.includes('offer_items');
+        if(isSameData(activeProduct, fresh) && !offerChanged) return;
         const params = new URLSearchParams(location.search);
         activeProduct = fresh;
         applyProductSelectionFromUrl(fresh, params);
+        await resolveProductOffer(params, fresh);
         activeImageIndex = Math.min(activeImageIndex, Math.max(0, productImages(fresh).length - 1));
         renderProductDetail();
       }catch(_error){}
@@ -1084,6 +1229,7 @@ function currentProductRelativeUrl(product = activeProduct){
   const id = cleanText(product.ID || new URLSearchParams(location.search).get('id'));
   if(category) params.set('cat', category);
   if(id) params.set('id', id);
+  if(offerItemIsLive(activeOfferItem)) params.set('offer', activeOfferItem.id);
   const variant = selectedProductVariant(product);
   const colorMode = isColorVariantMode(product);
   if(colorMode){
@@ -1341,7 +1487,8 @@ function renderProductDetail(){
       <p class="tag product-path">${escapeHtml(product.Category)}${product.Subcategory ? ' • ' + escapeHtml(product.Subcategory) : ''}</p>
       <h1>${escapeHtml(product.Name)}</h1>
       ${product.Description ? `<p class="muted detail-description">${escapeHtml(product.Description)}</p>` : ''}
-      ${priceHtml(product, variant)}
+      ${productOfferNoticeHtml()}
+      ${productOfferPriceHtml(product, variant)}
       <div class="detail-option-card">
         ${colorMode ? `<div class="option-block"><b>Choose colour</b><div class="color-variant-options">${product.Variants.map((v,i)=>{ const available = variantIsAvailable(v, product); const stockLabel = variantAvailabilityLabel(product, v); return `<button class="color-variant-choice ${i===activeVariantIndex?'active':''} ${available?'':'is-out-stock'}" type="button" onclick="selectColorVariant(${i})" aria-pressed="${i===activeVariantIndex?'true':'false'}" ${available?'':`title="View and share this out-of-stock colour"`}><span>${escapeHtml(v.color || v.label || 'Colour')}</span>${stockLabel?`<small class="variant-stock-label ${available?'is-available':''}">${escapeHtml(stockLabel)}</small>`:''}</button>`; }).join('')}</div></div>` : ''}
         ${hasVariants ? `<div class="option-block"><b>Choose ${escapeHtml(optionTitle)}</b><div class="size-variant-options option-variant-options">${product.Variants.map((v,i)=>{ const available = variantIsAvailable(v, product); const stockLabel = variantAvailabilityLabel(product, v); return `<button class="size-variant-choice ${i===activeVariantIndex?'active':''} ${available?'':'is-out-stock'}" type="button" onclick="selectVariant(${i})" ${available?'':`title="View and share this out-of-stock option"`}><span>${escapeHtml(v.label || 'Standard')}</span>${stockLabel?`<small class="variant-stock-label ${available?'is-available':''}">${escapeHtml(stockLabel)}</small>`:''}</button>`; }).join('')}</div></div>` : ''}
@@ -1563,6 +1710,8 @@ function handleAddToCart(){
   const image = firstImage(gallery, product.Image);
   const size = colorMode ? selectedSizeText() : (variant.label || 'Standard');
   const color = colorMode ? (variant.color || variant.label || 'Default') : selectedStandaloneColorText(product);
+  const regularPrice = money(variant.price || product.Price) || money(variant.mrp || product.MRP);
+  const liveOffer = offerItemIsLive(activeOfferItem) ? activeOfferItem : null;
   addCartItem(product, {
     category: product.Category,
     image,
@@ -1570,8 +1719,12 @@ function handleAddToCart(){
     size,
     color,
     qty: document.getElementById('qty')?.textContent || 1,
-    price: variant.price || product.Price,
-    mrp: variant.mrp || product.MRP,
+    price: liveOffer ? money(liveOffer.offerPrice) : (variant.price || product.Price),
+    mrp: liveOffer ? regularPrice : (variant.mrp || product.MRP),
+    offerId: liveOffer ? liveOffer.id : '',
+    offerValidUntil: liveOffer ? liveOffer.validUntil : '',
+    offerPrice: liveOffer ? money(liveOffer.offerPrice) : 0,
+    offerStatus: liveOffer ? 'live' : '',
     subcategory: product.Subcategory,
     terms: selectedPolicyTerms(product.Terms).map(term => term.label),
     stockStatus: variant.stockStatus || product.StockStatus || 'in_stock',

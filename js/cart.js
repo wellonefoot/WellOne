@@ -42,6 +42,7 @@ function cartProductRelativeLink(item){
   const color = cartText(item && item.color, 'Default');
   if(category) params.set('cat', category);
   if(id) params.set('id', id);
+  if(cartText(item && item.offerId) && cartText(item && item.offerStatus) === 'live') params.set('offer', cartText(item.offerId));
   if(variant && variant.toLowerCase() !== 'standard') params.set('variant', variant);
   if(color && color.toLowerCase() !== 'default'){
     params.set('color', color);
@@ -90,6 +91,11 @@ function normalizeCart(rawItems){
       stockStatus: cartText(raw.stockStatus || raw.StockStatus || raw.stock_status || 'in_stock'),
       trackInventory: raw.trackInventory === true || raw.TrackInventory === true || raw.track_inventory === true,
       stockQuantity: Math.max(0, Math.floor(cartNumber(raw.stockQuantity ?? raw.StockQuantity ?? raw.stock_quantity, 0))),
+      offerId: cartText(raw.offerId || raw.offer_id || ''),
+      offerValidUntil: cartText(raw.offerValidUntil || raw.offer_valid_until || ''),
+      offerPrice: cartNumber(raw.offerPrice ?? raw.offer_price, 0),
+      offerStatus: cartText(raw.offerStatus || raw.offer_status || ''),
+      offerMessage: cartText(raw.offerMessage || raw.offer_message || ''),
       availabilityStatus: cartText(raw.availabilityStatus || raw.availability_status || 'ok'),
       availabilityMessage: cartText(raw.availabilityMessage || raw.availability_message || ''),
       qty: Math.max(1, Math.floor(cartNumber(raw.qty || raw.quantity || raw.Qty, 1)))
@@ -103,6 +109,15 @@ function normalizeCart(rawItems){
       if(!old.mrp && item.mrp) old.mrp = item.mrp;
       if(!old.terms.length && item.terms.length) old.terms = item.terms;
       if(item.trackInventory){ old.trackInventory = true; old.stockQuantity = item.stockQuantity; }
+      if(item.offerId){
+        old.offerId = item.offerId;
+        old.offerValidUntil = item.offerValidUntil;
+        old.offerPrice = item.offerPrice;
+        old.offerStatus = item.offerStatus || 'live';
+        old.offerMessage = item.offerMessage || '';
+        if(item.price) old.price = item.price;
+        if(item.mrp) old.mrp = item.mrp;
+      }
     }else{
       item.key = key;
       merged.set(key, item);
@@ -170,6 +185,11 @@ function addCartItem(product, selected = {}){
     stockStatus: cartText(selected.stockStatus || product.StockStatus || product.stock_status || 'in_stock'),
     trackInventory,
     stockQuantity,
+    offerId: cartText(selected.offerId || ''),
+    offerValidUntil: cartText(selected.offerValidUntil || ''),
+    offerPrice: cartNumber(selected.offerPrice, 0),
+    offerStatus: cartText(selected.offerStatus || ''),
+    offerMessage: cartText(selected.offerMessage || ''),
     qty: Math.max(1, Math.floor(cartNumber(selected.qty, 1)))
   };
   if(item.trackInventory) item.qty = Math.min(item.qty, item.stockQuantity);
@@ -185,6 +205,11 @@ function addCartItem(product, selected = {}){
       if(item.image) existing.image = item.image;
       existing.price = item.price;
       existing.mrp = item.mrp;
+      existing.offerId = item.offerId;
+      existing.offerValidUntil = item.offerValidUntil;
+      existing.offerPrice = item.offerPrice;
+      existing.offerStatus = item.offerStatus;
+      existing.offerMessage = item.offerMessage;
       saveCart(cart);
       showSoftToast(`Only ${item.stockQuantity} left in stock`);
       return;
@@ -195,6 +220,11 @@ function addCartItem(product, selected = {}){
     if(item.image) existing.image = item.image;
     existing.price = item.price;
     existing.mrp = item.mrp;
+    existing.offerId = item.offerId;
+    existing.offerValidUntil = item.offerValidUntil;
+    existing.offerPrice = item.offerPrice;
+    existing.offerStatus = item.offerStatus;
+    existing.offerMessage = item.offerMessage;
   }else{
     item.key = key;
     cart.push(item);
@@ -256,8 +286,10 @@ function cartItemHtml(item, index){
     item.variant && item.variant !== 'Standard' ? `<span>${item.color && item.color !== 'Default' ? 'Size' : 'Option'} <b>${cartEscape(item.variant)}</b></span>` : '',
     item.color && item.color !== 'Default' ? `<span>Color <b>${cartEscape(item.color)}</b></span>` : '',
     item.subcategory ? `<span>${cartEscape(item.subcategory)}</span>` : '',
+    item.offerStatus === 'live' && item.offerId ? '<span class="cart-offer-chip"><b>Offer price</b></span>' : '',
     item.trackInventory === true ? `<span><b>${Math.max(0, Math.floor(cartNumber(item.stockQuantity, 0)))}</b> in stock</span>` : ''
   ].filter(Boolean).join('');
+  const offerWarning = item.offerStatus === 'expired' ? `<div class="cart-offer-warning"><b>Offer expired</b><span>${cartEscape(item.offerMessage || 'The regular product price is now applied.')}</span></div>` : '';
   const productHref = cartProductRelativeLink(item);
   const safeProductHref = cartEscape(productHref);
   return `<article class="premium-cart-item cart-item-clickable ${hasAvailabilityIssue ? 'cart-item-issue' : ''}" data-product-url="${safeProductHref}" tabindex="0" role="link" aria-label="Open ${cartEscape(item.name)}">
@@ -268,6 +300,7 @@ function cartItemHtml(item, index){
       ${meta ? `<div class="premium-cart-meta">${meta}</div>` : ''}
       <div class="premium-cart-price"><strong>${cartPriceText(lineTotal)}</strong>${item.mrp && item.mrp > item.price ? `<del>${cartPriceText(item.mrp * qty)}</del>` : ''}${saving ? `<em>Save ${cartPriceText(saving)}</em>` : ''}</div>
       ${hasAvailabilityIssue ? `<div class="cart-item-warning"><b>${cartEscape(availabilityTitle)}</b><span>${cartEscape(availabilityMessage)}</span><a href="${shopPhoneHref()}">Contact ${cartEscape(shopPhonePretty())}</a></div>` : ''}
+      ${offerWarning}
       ${item.terms && item.terms.length ? `<div class="premium-cart-terms">${item.terms.slice(0,3).map(t => `<span>${cartEscape(t)}</span>`).join('')}</div>` : ''}
       <div class="premium-cart-actions">
         <div class="premium-qty" aria-label="Quantity control"><button type="button" onclick="changeCartQty('${safeKey}', -1)">−</button><b>${qty}</b><button type="button" onclick="changeCartQty('${safeKey}', 1)">+</button></div>
@@ -329,6 +362,35 @@ async function getLiveCartProduct(item){
     return {ID:data.id, Name:data.name, MRP:data.mrp, Price:data.price, Status:data.status, StockStatus:data.stock_status, TrackInventory:data.track_inventory === true, StockQuantity:Math.max(0, cartNumber(data.stock_quantity, 0)), Image:data.main_image_url, Sizes:data.sizes, Colors:data.colors, VariantMode:(data.product_variants||[]).some(v=>cartText(v.unit))?'color':'option', Variants:(data.product_variants||[]).map(v=>({label:v.unit || v.label || 'Standard', color:v.unit || '', sizeOptions:cartText(v.label).split(/[|,\n]+/).map(x=>x.trim()).filter(Boolean), price:v.price || data.price, mrp:v.mrp || data.mrp, images:(v.image_urls&&v.image_urls.length?v.image_urls:[v.image_url].filter(Boolean)), stock:Math.max(0, cartNumber(v.stock, 0)), stockStatus:cartText(v.stock_status || 'in_stock'), inventorySource:'variant'}))};
   }
   return null;
+}
+function cartOfferProductId(link){
+  const raw = cartText(link);
+  if(!raw) return '';
+  try{
+    const base = (typeof location !== 'undefined' && location.href) ? location.href : 'https://wellone.in/';
+    return cartText(new URL(raw, base).searchParams.get('id'));
+  }catch(_error){ return ''; }
+}
+function cartOfferExpired(validUntil){
+  const text = cartText(validUntil);
+  if(!text) return false;
+  const time = new Date(text).getTime();
+  return Number.isFinite(time) && time <= Date.now();
+}
+async function getLiveCartOffer(item){
+  const offerId = cartText(item && item.offerId);
+  if(!offerId) return null;
+  const client = (typeof supabaseClient === 'function')
+    ? supabaseClient()
+    : (window.__welloneSupabase || window.supabase.createClient(SITE_CONFIG.supabaseUrl, SITE_CONFIG.supabaseAnonKey));
+  window.__welloneSupabase = client;
+  const {data, error} = await client
+    .from('offer_items')
+    .select('id,item_link,offer_price,valid_until,is_active')
+    .eq('id', offerId)
+    .maybeSingle();
+  if(error) throw error;
+  return data || null;
 }
 async function checkCartAvailabilityAndRefresh(){
   const cart = getCart();
@@ -421,8 +483,37 @@ async function checkCartAvailabilityAndRefresh(){
 
       const variants = Array.isArray(live.Variants) ? live.Variants : [];
       matched = matched || (live.VariantMode === 'color' ? variants.find(v => cartText(v.color || v.label).toLowerCase() === cartText(item.color || 'Default').toLowerCase()) : variants.find(v => cartText(v.label || 'Standard').toLowerCase() === cartText(item.variant || 'Standard').toLowerCase())) || variants[0] || live;
-      const newPrice = cartNumber(matched.price || live.Price, item.price);
-      const newMrp = cartNumber(matched.mrp || live.MRP, item.mrp);
+      const regularPrice = cartNumber(matched.price || live.Price, item.price);
+      const regularMrp = cartNumber(matched.mrp || live.MRP, item.mrp);
+      let newPrice = regularPrice;
+      let newMrp = regularMrp;
+
+      if(item.offerId){
+        const liveOffer = await getLiveCartOffer(item);
+        const linkedProductId = liveOffer ? cartOfferProductId(liveOffer.item_link) : '';
+        const offerMatchesProduct = !!liveOffer && (!linkedProductId || linkedProductId === cartText(item.id));
+        const offerStillLive = offerMatchesProduct && liveOffer.is_active !== false && !cartOfferExpired(liveOffer.valid_until) && cartNumber(liveOffer.offer_price, 0) > 0;
+        if(offerStillLive){
+          newPrice = cartNumber(liveOffer.offer_price, regularPrice);
+          newMrp = regularPrice || regularMrp;
+          const validUntil = cartText(liveOffer.valid_until);
+          if(item.offerPrice !== newPrice || item.offerValidUntil !== validUntil || item.offerStatus !== 'live' || item.offerMessage){
+            item.offerPrice = newPrice;
+            item.offerValidUntil = validUntil;
+            item.offerStatus = 'live';
+            item.offerMessage = '';
+            changed = true;
+          }
+        }else{
+          item.offerId = '';
+          item.offerValidUntil = '';
+          item.offerPrice = 0;
+          item.offerStatus = 'expired';
+          item.offerMessage = 'The promotion has ended. The current regular product price is now applied.';
+          changed = true;
+        }
+      }
+
       if(newPrice && newPrice !== item.price){ item.price = newPrice; changed = true; }
       if(newMrp !== item.mrp){ item.mrp = newMrp; changed = true; }
       const newImage = cartText((matched.images && matched.images[0]) || live.Image || item.image);
@@ -498,7 +589,8 @@ function orderMessage(customerName, customerPhone, customerAddress){
     if(item.color && item.color !== 'Default') message += `Colour: ${item.color}\n`;
     message += `Qty: ${qty}\n`;
     message += `Rate: ${cartPriceText(item.price)}\n`;
-    if(item.mrp && item.mrp > item.price) message += `MRP: ${cartPriceText(item.mrp)}\n`;
+    if(item.offerStatus === 'live' && item.offerId) message += `Offer price applied\n`;
+    if(item.mrp && item.mrp > item.price) message += `${item.offerStatus === 'live' && item.offerId ? 'Regular price' : 'MRP'}: ${cartPriceText(item.mrp)}\n`;
     message += `Item Total: ${cartPriceText(lineTotal)}\n`;
     if(productLink) message += `Selected Variant Link: ${productLink}\n`;
     if(item.image) message += `Image: ${item.image}\n`;
