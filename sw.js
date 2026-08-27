@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'wellone-customer-v76-inventory-barcode-offers';
+const CACHE_VERSION = 'wellone-customer-v77-inventory-offers';
 const SHELL_CACHE = `${CACHE_VERSION}-shell`;
 const RUNTIME_CACHE = `${CACHE_VERSION}-runtime`;
 const SHELL_ASSETS = [

@@ -2668,33 +2668,7 @@ body{
 .catalog-page .filter-chips .chip{transition:background-color .14s ease,border-color .14s ease,color .14s ease,transform .14s ease!important;}
 
 
-/* WellOne v76 — customer inventory, barcode search and offer items */
-.search-bar{position:relative!important;grid-template-columns:1fr auto!important;align-items:center!important;}
-.home-page .search-bar input,.catalog-page .search-bar input{padding-right:98px!important;}
-.barcode-search-btn{
-  position:absolute!important;right:48px!important;top:50%!important;transform:translateY(-50%)!important;
-  width:38px!important;height:38px!important;min-width:38px!important;min-height:38px!important;padding:0!important;
-  border:0!important;border-radius:12px!important;background:rgba(111,143,13,.09)!important;color:var(--brand)!important;
-  display:flex!important;align-items:center!important;justify-content:center!important;z-index:3!important;box-shadow:none!important;
-}
-.barcode-search-btn:hover{background:rgba(111,143,13,.15)!important;}
-.barcode-search-btn span{position:relative;width:20px;height:15px;border:2px solid currentColor;border-left-width:1px;border-right-width:1px;border-radius:2px;display:block;}
-.barcode-search-btn span:before{content:'';position:absolute;left:3px;right:3px;top:2px;bottom:2px;background:repeating-linear-gradient(90deg,currentColor 0 1px,transparent 1px 3px,currentColor 3px 5px,transparent 5px 7px);opacity:.9;}
-.barcode-search-btn span:after{content:'';position:absolute;inset:-5px;border-left:2px solid currentColor;border-right:2px solid currentColor;border-radius:4px;opacity:.55;}
-.barcode-scanner-open{overflow:hidden!important;}
-.customer-barcode-scanner{position:fixed;inset:0;z-index:100000;background:rgba(28,34,24,.66);backdrop-filter:blur(8px);display:flex;align-items:center;justify-content:center;padding:18px;}
-.customer-barcode-card{width:min(520px,100%);background:#fff;border-radius:26px;border:1px solid rgba(111,143,13,.16);box-shadow:0 24px 70px rgba(31,39,23,.2);padding:18px;}
-.customer-barcode-head{display:flex;gap:14px;align-items:flex-start;justify-content:space-between;margin-bottom:14px;}
-.customer-barcode-head>div{display:grid;gap:4px;}.customer-barcode-head b{font-size:20px;color:var(--ink);}.customer-barcode-head small{color:var(--muted);line-height:1.45;}
-.customer-barcode-head button{border:0;background:#f3f5ef;width:38px;height:38px;min-width:38px;border-radius:50%;font-size:25px;line-height:1;cursor:pointer;color:var(--ink);}
-.customer-barcode-video-wrap{position:relative;min-height:230px;background:#141812;border-radius:20px;overflow:hidden;display:flex;align-items:center;justify-content:center;}
-.customer-barcode-video-wrap video{width:100%;height:280px;object-fit:cover;display:block;}
-.customer-barcode-video-wrap p{position:absolute;left:12px;right:12px;bottom:10px;margin:0;padding:9px 12px;border-radius:12px;background:rgba(0,0,0,.58);color:#fff;text-align:center;font-size:12px;line-height:1.4;}
-.customer-barcode-line{position:absolute;left:12%;right:12%;top:50%;height:2px;background:#dff28c;box-shadow:0 0 12px rgba(223,242,140,.85);z-index:2;}
-.customer-barcode-manual{display:grid;grid-template-columns:1fr auto;gap:8px;margin-top:12px;}
-.customer-barcode-manual input{min-width:0;height:46px;border:1px solid var(--line);border-radius:14px;padding:0 13px;font:inherit;outline:none;}
-.customer-barcode-manual input:focus{border-color:#aecb5a;box-shadow:0 0 0 4px rgba(111,143,13,.08);}
-.customer-barcode-manual button{border:0;border-radius:14px;background:var(--brand);color:#fff;font-weight:900;padding:0 16px;cursor:pointer;}
+/* WellOne v77 — customer inventory and offer items */
 .stock-availability-note{margin:12px 0 0;padding:10px 12px;border-radius:13px;background:rgba(111,143,13,.08);color:#49620a;font-size:13px;font-weight:850;}
 .variant-stock-label{display:block;margin-top:3px;font-size:10.5px!important;line-height:1.2!important;font-weight:850!important;color:#a1483f!important;white-space:nowrap;}
 .variant-stock-label.is-available{color:#607b14!important;}
@@ -2714,11 +2688,6 @@ body{
 .offer-item-copy h3{margin:0 0 7px;font-size:16px;line-height:1.15;letter-spacing:-.025em;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}
 .offer-item-price{display:flex;align-items:baseline;gap:7px;flex-wrap:wrap;margin-bottom:5px;}.offer-item-price del{font-size:11px;color:#999;}.offer-item-price strong{font-size:18px;color:var(--ink);}.offer-item-copy>small{font-size:10px;color:var(--muted);margin-bottom:7px;}.offer-item-link{margin-top:auto;font-size:11px;color:var(--brand);}
 @media(max-width:720px){
-  .home-page .search-bar input,.catalog-page .search-bar input{padding-right:84px!important;}
-  .barcode-search-btn{right:42px!important;width:32px!important;height:32px!important;min-width:32px!important;min-height:32px!important;border-radius:10px!important;}
-  .barcode-search-btn span{transform:scale(.82);}
-  .customer-barcode-scanner{align-items:flex-end;padding:10px;}.customer-barcode-card{border-radius:24px 24px 18px 18px;padding:14px;}.customer-barcode-video-wrap{min-height:210px;}.customer-barcode-video-wrap video{height:250px;}
-  .customer-barcode-manual{grid-template-columns:1fr;}.customer-barcode-manual button{height:44px;}
   .offer-items-grid{grid-template-columns:1fr;gap:9px;}.offer-item-card{grid-template-columns:102px 1fr;border-radius:18px;}.offer-item-media{min-height:118px;}.offer-item-copy{padding:11px 11px 10px 0;}.offer-item-copy h3{font-size:15px;}.offer-item-price strong{font-size:17px;}
   .variant-stock-label{font-size:9.5px!important;}
 }

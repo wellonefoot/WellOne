@@ -186,7 +186,7 @@ function addCartItem(product, selected = {}){
       existing.price = item.price;
       existing.mrp = item.mrp;
       saveCart(cart);
-      showSoftToast(`Only ${item.stockQuantity} available`);
+      showSoftToast(`Only ${item.stockQuantity} left in stock`);
       return;
     }
     existing.qty = requested;
@@ -216,7 +216,7 @@ function changeCartQty(key, amount){
   if(!item) return;
   const requested = Math.max(1, Math.floor(cartNumber(item.qty, 1) + amount));
   if(amount > 0 && item.trackInventory === true && requested > Math.max(0, cartNumber(item.stockQuantity, 0))){
-    showSoftToast(`Only ${Math.max(0, cartNumber(item.stockQuantity, 0))} available`);
+    showSoftToast(`Only ${Math.max(0, cartNumber(item.stockQuantity, 0))} left in stock`);
     return;
   }
   item.qty = requested;
@@ -250,13 +250,13 @@ function cartItemHtml(item, index){
   const saving = item.mrp && item.price && item.mrp > item.price ? (item.mrp - item.price) * qty : 0;
   const availabilityStatus = cartText(item.availabilityStatus || 'ok').toLowerCase();
   const hasAvailabilityIssue = availabilityStatus && availabilityStatus !== 'ok';
-  const availabilityTitle = availabilityStatus === 'removed' ? 'Removed from shop' : availabilityStatus === 'out_of_stock' ? 'Out of stock' : availabilityStatus === 'insufficient_stock' ? 'Limited stock' : 'Need availability check';
+  const availabilityTitle = availabilityStatus === 'removed' ? 'Removed from shop' : availabilityStatus === 'out_of_stock' ? 'Out of stock' : availabilityStatus === 'insufficient_stock' ? 'Limited Stock' : 'Availability Update';
   const availabilityMessage = cartText(item.availabilityMessage || `${availabilityTitle}. Contact ${shopPhonePretty()} for support and latest availability.`);
   const meta = [
     item.variant && item.variant !== 'Standard' ? `<span>${item.color && item.color !== 'Default' ? 'Size' : 'Option'} <b>${cartEscape(item.variant)}</b></span>` : '',
     item.color && item.color !== 'Default' ? `<span>Color <b>${cartEscape(item.color)}</b></span>` : '',
     item.subcategory ? `<span>${cartEscape(item.subcategory)}</span>` : '',
-    item.trackInventory === true ? `<span><b>${Math.max(0, Math.floor(cartNumber(item.stockQuantity, 0)))}</b> available</span>` : ''
+    item.trackInventory === true ? `<span><b>${Math.max(0, Math.floor(cartNumber(item.stockQuantity, 0)))}</b> in stock</span>` : ''
   ].filter(Boolean).join('');
   const productHref = cartProductRelativeLink(item);
   const safeProductHref = cartEscape(productHref);

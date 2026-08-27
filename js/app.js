@@ -25,9 +25,6 @@ let productLiveRefreshTimer = null;
 let catalogRequestSerial = 0;
 let filterRenderSerial = 0;
 let catalogRefreshPending = false;
-let customerBarcodeStream = null;
-let customerBarcodeScanTimer = null;
-let customerBarcodeDetector = null;
 const WELLONE_PUBLIC_ORIGIN = 'https://wellone.in';
 
 function absoluteWelloneUrl(relative = ''){
@@ -379,79 +376,6 @@ function offerItemCard(item){
       <b class="offer-item-link">View item <span aria-hidden="true">→</span></b>
     </div>
   </a>`;
-}
-function closeCustomerBarcodeScanner(){
-  if(customerBarcodeScanTimer){ clearTimeout(customerBarcodeScanTimer); customerBarcodeScanTimer = null; }
-  if(customerBarcodeStream){ customerBarcodeStream.getTracks().forEach(track => track.stop()); customerBarcodeStream = null; }
-  customerBarcodeDetector = null;
-  const video = document.getElementById('customerBarcodeVideo');
-  if(video){ try{ video.pause(); }catch(_error){} video.srcObject = null; }
-  document.getElementById('customerBarcodeScanner')?.remove();
-  document.documentElement.classList.remove('barcode-scanner-open');
-}
-async function useCustomerBarcode(code){
-  const value = cleanText(code);
-  if(!value) return;
-  const message = document.getElementById('customerBarcodeMessage');
-  if(message) message.textContent = 'Finding product…';
-  try{
-    const product = await findProductByBarcode(value);
-    if(product && product.id){
-      const params = new URLSearchParams();
-      if(product.category) params.set('cat', product.category);
-      params.set('id', product.id);
-      closeCustomerBarcodeScanner();
-      location.href = `product.html?${params.toString()}`;
-      return;
-    }
-    if(message) message.textContent = 'No available product was found for this code.';
-    document.getElementById('customerBarcodeManual')?.focus();
-  }catch(_error){
-    if(message) message.textContent = 'Could not check this code. Check your connection and try again.';
-  }
-}
-async function customerBarcodeDetectLoop(){
-  const video = document.getElementById('customerBarcodeVideo');
-  if(!video || !customerBarcodeStream || !customerBarcodeDetector) return;
-  try{
-    if(video.readyState >= 2){
-      const codes = await customerBarcodeDetector.detect(video);
-      const value = cleanText(codes && codes[0] && codes[0].rawValue);
-      if(value){ await useCustomerBarcode(value); return; }
-    }
-  }catch(_error){}
-  customerBarcodeScanTimer = setTimeout(customerBarcodeDetectLoop, 180);
-}
-async function startCustomerBarcodeScanner(){
-  closeCustomerBarcodeScanner();
-  document.body.insertAdjacentHTML('beforeend', `<div id="customerBarcodeScanner" class="customer-barcode-scanner" role="dialog" aria-modal="true" aria-labelledby="customerBarcodeTitle" onclick="if(event.target===this) closeCustomerBarcodeScanner()">
-    <div class="customer-barcode-card">
-      <div class="customer-barcode-head"><div><b id="customerBarcodeTitle">Scan product code</b><small>Point your camera at the product barcode, or enter the code below.</small></div><button type="button" onclick="closeCustomerBarcodeScanner()" aria-label="Close scanner">×</button></div>
-      <div class="customer-barcode-video-wrap"><video id="customerBarcodeVideo" playsinline muted></video><span class="customer-barcode-line" aria-hidden="true"></span><p id="customerBarcodeMessage">Starting scanner…</p></div>
-      <form class="customer-barcode-manual" onsubmit="event.preventDefault();useCustomerBarcode(document.getElementById('customerBarcodeManual').value)"><input id="customerBarcodeManual" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Enter or scan code"><button type="submit">Find item</button></form>
-    </div>
-  </div>`);
-  document.documentElement.classList.add('barcode-scanner-open');
-  const message = document.getElementById('customerBarcodeMessage');
-  const manual = document.getElementById('customerBarcodeManual');
-  if(!('BarcodeDetector' in window) || !navigator.mediaDevices?.getUserMedia){
-    if(message) message.textContent = 'Camera barcode scanning is not supported here. Enter the code below or use a hardware scanner.';
-    manual?.focus();
-    return;
-  }
-  try{
-    customerBarcodeDetector = new BarcodeDetector();
-    customerBarcodeStream = await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}}, audio:false});
-    const video = document.getElementById('customerBarcodeVideo');
-    if(!video){ closeCustomerBarcodeScanner(); return; }
-    video.srcObject = customerBarcodeStream;
-    await video.play();
-    if(message) message.textContent = 'Align the barcode inside the camera area.';
-    customerBarcodeDetectLoop();
-  }catch(_error){
-    if(message) message.textContent = 'Camera is unavailable. Enter the code below or use a hardware scanner.';
-    manual?.focus();
-  }
 }
 function bindOfferDots(slider, dots){
   if(!slider || !dots) return;
@@ -1325,7 +1249,7 @@ function variantAvailabilityLabel(product, variant){
   if(!variantIsAvailable(variant, product)) return 'Out of stock';
   const stock = selectedStockQuantity(product, variant);
   if(stock === null) return '';
-  return `${stock} available`;
+  return stock <= 5 ? `Only ${stock} left` : `${stock} in stock`;
 }
 function firstAvailableVariantIndex(product){
   const variants = Array.isArray(product && product.Variants) ? product.Variants : [];
@@ -1343,13 +1267,13 @@ function productStockNote(product, variant = null){
   if(!productIsAvailable(product, variant)){
     if(product && cleanText(product.StockStatus || 'in_stock') !== 'out_of_stock' && variant && !variantIsAvailable(variant, product)){
       const label = cleanText(variant.color || variant.label || 'Selected option');
-      return `<div class="stock-alert">${escapeHtml(label)} is currently out of stock. Choose another available option.</div>`;
+      return `<div class="stock-alert">${escapeHtml(label)} is currently out of stock. Please choose another option.</div>`;
     }
     return '<div class="stock-alert">Currently out of stock. Contact the shop to check availability.</div>';
   }
   const stock = selectedStockQuantity(product, variant);
   if(stock === null) return '';
-  const label = stock === 1 ? 'Only 1 unit available.' : `${stock} units available.`;
+  const label = stock === 1 ? 'Only 1 left in stock.' : stock <= 5 ? `Only ${stock} left in stock.` : `${stock} units in stock.`;
   return `<div class="stock-availability-note">${label}</div>`;
 }
 function productGalleryImages(product, variant){
@@ -1625,7 +1549,7 @@ function changeQty(amount){
   const stock = selectedStockQuantity(activeProduct, selectedProductVariant(activeProduct));
   if(stock !== null && next > stock){
     next = Math.max(1, stock);
-    if(Number(amount || 0) > 0) showSoftToast(stock === 1 ? 'Only 1 unit is available' : `Only ${stock} units are available`);
+    if(Number(amount || 0) > 0) showSoftToast(stock === 1 ? 'Only 1 left in stock' : `Only ${stock} left in stock`);
   }
   qty.textContent = String(next);
 }
@@ -1666,9 +1590,6 @@ function shareProductLink(){
   }
   navigator.clipboard?.writeText(url).then(() => showSoftToast('Selected option link copied')).catch(() => { prompt('Copy selected option link', url); });
 }
-window.addEventListener('pagehide', closeCustomerBarcodeScanner);
-document.addEventListener('keydown', event => { if(event.key === 'Escape' && document.getElementById('customerBarcodeScanner')) closeCustomerBarcodeScanner(); });
-
 function initCartPage(){
   if(window.WelloneCart && typeof WelloneCart.renderCartItems === 'function') WelloneCart.renderCartItems();
   else renderCartItems();

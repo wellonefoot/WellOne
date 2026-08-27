@@ -1,4 +1,4 @@
-/* Wellone customer data v76 — inventory, barcode lookup, promotional items and admin-success event updates
+/* Wellone customer data v77 — inventory, promotional items and admin-success event updates
    Supabase Database + Supabase Storage only.
 */
 'use strict';
@@ -667,21 +667,12 @@ async function searchMatchIds(q, categoryId){
     .select('product_id,label,unit')
     .or(variantOr)
     .limit(60);
-  let barcodeQuery = supabaseClient()
-    .from('products')
-    .select('id')
-    .eq('barcode_enabled', true)
-    .eq('barcode', rawQuery)
-    .eq('status', 'active')
-    .limit(20);
-  if(categoryId) barcodeQuery = barcodeQuery.eq('category_id', categoryId);
-  const [catRes, subRes, variantRes, barcodeRes] = await Promise.all([
+  const [catRes, subRes, variantRes] = await Promise.all([
     supabaseClient().from('categories').select('id,name').eq('is_active', true),
     categoryId
       ? supabaseClient().from('subcategories').select('id,name,category_id').eq('is_active', true).eq('category_id', categoryId)
       : supabaseClient().from('subcategories').select('id,name,category_id').eq('is_active', true),
-    variantQuery,
-    barcodeQuery
+    variantQuery
   ]);
   const matchesAny = value => {
     const text = cleanText(value).toLowerCase();
@@ -689,10 +680,7 @@ async function searchMatchIds(q, categoryId){
   };
   const categoryIds = uniqueClean((catRes.data || []).filter(c => matchesAny(c.name)).map(c => c.id));
   const subcategoryIds = uniqueClean((subRes.data || []).filter(s => matchesAny(s.name)).map(s => s.id));
-  const productIds = uniqueClean([
-    ...(variantRes.data || []).map(v => v.product_id),
-    ...(barcodeRes.data || []).map(product => product.id)
-  ]).slice(0, 80);
+  const productIds = uniqueClean((variantRes.data || []).map(v => v.product_id)).slice(0, 80);
   return {categoryIds, subcategoryIds, productIds};
 }
 function searchOrParts(q, ids = {}){
@@ -762,20 +750,6 @@ async function searchGlobalProducts(queryText, opts = {}){
   const pack = {products, nextOffset, total: offset + products.length + (hasMore ? 1 : 0)};
   writeFastCache(cacheName, pack);
   return pack;
-}
-async function findProductByBarcode(code){
-  const value = cleanText(code);
-  if(!value) return null;
-  const {data, error} = await supabaseClient()
-    .from('products')
-    .select('id,name,status,categories(id,name)')
-    .eq('barcode_enabled', true)
-    .eq('barcode', value)
-    .eq('status', 'active')
-    .maybeSingle();
-  if(error) throw error;
-  if(!data || !data.id) return null;
-  return {id:cleanText(data.id), name:cleanText(data.name), category:cleanText(data.categories && data.categories.name)};
 }
 async function findProduct(categoryName, productId, opts = {}){
   if(!opts.forceRefresh){
