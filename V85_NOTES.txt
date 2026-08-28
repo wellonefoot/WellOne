@@ -1,0 +1,6 @@
+WellOne v85 — customer navigation recovery
+- Service worker never intercepts HTML/document navigation.
+- catalog.html?cat=..., product.html?id=..., cart, offers and orders load directly from the deployed host.
+- Only versioned CSS/JS/fonts and images are cached.
+- Supabase database/auth/realtime requests are never cached by the service worker.
+- Fresh v85 cache namespace automatically removes earlier WellOne customer SW caches.

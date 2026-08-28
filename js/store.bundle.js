@@ -71,7 +71,7 @@ function cartAbsoluteUrl(relativeUrl){
     return new URL(relativeUrl, base).href;
   }catch(e){ return relativeUrl || ''; }
 }
-function normalizeTerms(value){
+function normalizeCartTerms(value){
   const clean = term => {
     if(!term) return '';
     if(typeof term === 'object'){
@@ -95,13 +95,14 @@ function normalizeCart(rawItems){
       name: cartText(raw.name || raw.Name, 'Product'),
       category: cartText(raw.category || raw.Category, ''),
       subcategory: cartText(raw.subcategory || raw.Subcategory, ''),
+      optionTitle: cartText(raw.optionTitle || raw.option_title || raw.OptionTitle || 'Size', 'Size'),
       price: cartNumber(raw.price || raw.Price, 0),
       mrp: cartNumber(raw.mrp || raw.MRP, 0),
       image: cartText(raw.image || raw.Image || ''),
       variant,
       size: variant,
       color: cartText(raw.color || raw.Color || raw.option || raw.Option, 'Default'),
-      terms: normalizeTerms(raw.terms || raw.Terms),
+      terms: normalizeCartTerms(raw.terms || raw.Terms),
       stockStatus: cartText(raw.stockStatus || raw.StockStatus || raw.stock_status || 'in_stock'),
       trackInventory: raw.trackInventory === true || raw.TrackInventory === true || raw.track_inventory === true,
       stockQuantity: Math.max(0, Math.floor(cartNumber(raw.stockQuantity ?? raw.StockQuantity ?? raw.stock_quantity, 0))),
@@ -190,13 +191,14 @@ function addCartItem(product, selected = {}){
     name: cartText(product.Name || product.name, 'Product'),
     category: cartText(selected.category || product.Category || product.category, ''),
     subcategory: cartText(selected.subcategory || product.Subcategory || ''),
+    optionTitle: cartText(selected.optionTitle || product.OptionTitle || product.option_title || 'Size', 'Size'),
     price,
     mrp,
     image: cartText(selected.image || product.Image || product.image || ''),
     variant,
     size: variant,
     color: cartText(selected.color, 'Default'),
-    terms: normalizeTerms(selected.terms || product.Terms),
+    terms: normalizeCartTerms(selected.terms || product.Terms),
     stockStatus: cartText(selected.stockStatus || product.StockStatus || product.stock_status || 'in_stock'),
     trackInventory,
     stockQuantity,
@@ -274,17 +276,23 @@ function clearCart(){
   if(typeof renderCartItems === 'function') renderCartItems();
   showSoftToast('Cart cleared');
 }
-function clearSubmittedOrderCart(){
-  localStorage.setItem(ORDER_CART_CLEAR_KEY, String(Date.now()));
-  localStorage.setItem(CART_KEY, '[]');
-  clearLegacyCartKeys();
-  updateCartCount([]);
-  if(typeof renderCartItems === 'function') renderCartItems();
+function clearSubmittedOrderCart(confirmedItems = []){
+  // Remove only the exact lines submitted with this order. This avoids a stale
+  // "clear pending" flag deleting items the customer adds after checkout.
+  const submitted = normalizeCart(confirmedItems);
+  const removeQty = new Map(submitted.map(item => [cartItemKey(item), Math.max(1, cartNumber(item.qty, 1))]));
+  const next = [];
+  getCart().forEach(item => {
+    const key = cartItemKey(item);
+    const remaining = Math.max(0, Math.floor(cartNumber(item.qty, 1)) - (removeQty.get(key) || 0));
+    if(remaining > 0) next.push({...item, qty:remaining});
+  });
+  localStorage.removeItem(ORDER_CART_CLEAR_KEY);
+  saveCart(next);
 }
 function finishPendingOrderCartClear(){
-  if(!localStorage.getItem(ORDER_CART_CLEAR_KEY)) return;
-  localStorage.setItem(CART_KEY, '[]');
-  clearLegacyCartKeys();
+  // v85 could leave this marker behind and later empty a newly-created cart.
+  // Clearing the marker without touching cart contents safely repairs that state.
   localStorage.removeItem(ORDER_CART_CLEAR_KEY);
 }
 function cartItemHtml(item, index){
@@ -298,7 +306,7 @@ function cartItemHtml(item, index){
   const availabilityTitle = availabilityStatus === 'removed' ? 'Removed from shop' : availabilityStatus === 'out_of_stock' ? 'Out of stock' : availabilityStatus === 'insufficient_stock' ? 'Limited Stock' : 'Availability Update';
   const availabilityMessage = cartText(item.availabilityMessage || `${availabilityTitle}. Contact ${shopPhonePretty()} for support and latest availability.`);
   const meta = [
-    item.variant && item.variant !== 'Standard' ? `<span>${item.color && item.color !== 'Default' ? 'Size' : 'Option'} <b>${cartEscape(item.variant)}</b></span>` : '',
+    item.variant && item.variant !== 'Standard' ? `<span>${cartEscape(item.optionTitle || (item.color && item.color !== 'Default' ? 'Size' : 'Option'))} <b>${cartEscape(item.variant)}</b></span>` : '',
     item.color && item.color !== 'Default' ? `<span>Color <b>${cartEscape(item.color)}</b></span>` : '',
     item.subcategory ? `<span>${cartEscape(item.subcategory)}</span>` : '',
     item.offerStatus === 'live' && item.offerId ? '<span class="cart-offer-chip"><b>Offer price</b></span>' : '',
@@ -439,7 +447,7 @@ function cartInventoryVariants(live){
   const exact=[];
   roots.forEach(root=>{
     if(Array.isArray(root?.sizeVariants) && root.sizeVariants.length){
-      root.sizeVariants.forEach(child=>exact.push({...child,color:clean(child.color || root.color || root.unit || '')}));
+      root.sizeVariants.forEach(child=>exact.push({...child,color:cartText(child.color || root.color || root.unit || '')}));
     }else exact.push(root);
   });
   return exact;
@@ -674,7 +682,7 @@ async function confirmOrderToDatabase(source = 'auto'){
     if(error) throw error;
     if(!data?.order_id || !data?.tracking_token) throw new Error('Order confirmation did not return a tracking reference.');
     saveOrderRef(data);
-    clearSubmittedOrderCart();
+    clearSubmittedOrderCart(cart);
     broadcastCustomerStockChange('customer-order-confirmed').catch(()=>{});
     window.location.assign(`order-confirmed.html?id=${encodeURIComponent(data.order_id)}`);
   }catch(error){
@@ -949,13 +957,13 @@ function sameName(a,b){ return cleanText(a).toLowerCase() === cleanText(b).toLow
 function normalizePrice(value){ return cleanText(value).replace(/^₹\s*/,'').replace(/,/g,''); }
 function money(value){ const n = Number(normalizePrice(value)); return Number.isFinite(n) && n > 0 ? n : 0; }
 function formatPrice(value){ const n = money(value); return n ? `₹${n}` : ''; }
-function cacheKey(name){ return 'wellone_supabase_v84_' + name; }
+function cacheKey(name){ return 'wellone_supabase_v85_' + name; }
 function now(){ return Date.now(); }
 function readAnyCache(name){ try{ const raw = localStorage.getItem(cacheKey(name)); if(!raw) return null; const pack = JSON.parse(raw); return pack && pack.data ? pack.data : null; }catch(e){ return null; } }
 function readFastCache(name){ try{ const raw = localStorage.getItem(cacheKey(name)); if(!raw) return null; const pack = JSON.parse(raw); if(!pack || !pack.time || now() - pack.time > FAST_CACHE_MS) return null; return pack.data || null; }catch(e){ return null; } }
 function pruneWelloneCache(maxEntries = 42){
   try{
-    const prefix = 'wellone_supabase_v84_';
+    const prefix = 'wellone_supabase_v85_';
     const entries = [];
     for(let i=0;i<localStorage.length;i++){
       const key = localStorage.key(i);
@@ -976,7 +984,7 @@ function writeFastCache(name, data){
 }
 function clearLegacyWelloneCaches(){
   try{
-    const currentPrefix = 'wellone_supabase_v84_';
+    const currentPrefix = 'wellone_supabase_v85_';
     const removals = [];
     for(let i=0;i<localStorage.length;i++){
       const key = localStorage.key(i) || '';
@@ -1184,6 +1192,12 @@ function normalizeProduct(row){
       const uniqueStockRows = new Map();
       group.sizeVariants.forEach(child => { if(child.id && !uniqueStockRows.has(child.id)) uniqueStockRows.set(child.id, child); });
       const stockRows = [...uniqueStockRows.values()];
+      const colourGallerySource = group.sizeVariants.find(child => child.hasOwnImages && Array.isArray(child.images) && child.images.length);
+      group.images = colourGallerySource ? colourGallerySource.images : product.Images;
+      group.hasOwnImages = Boolean(colourGallerySource);
+      group.sizeVariants.forEach(child => {
+        if(!child.hasOwnImages) child.images = group.images;
+      });
       group.stock = stockRows.reduce((sum, child) => sum + Math.max(0, Number(child.stock || 0) || 0), 0);
       group.stockStatus = !product.TrackInventory || stockRows.some(child => cleanText(child.stockStatus || 'in_stock') !== 'out_of_stock' && Number(child.stock || 0) > 0) ? 'in_stock' : 'out_of_stock';
     });
@@ -1246,7 +1260,7 @@ function findProductInCachedPages(categoryName, productId){
 
 function removeStoreCacheEntries(predicate){
   try{
-    const prefix = 'wellone_supabase_v84_';
+    const prefix = 'wellone_supabase_v85_';
     const removals = [];
     for(let i=0;i<localStorage.length;i++){
       const key = localStorage.key(i) || '';
@@ -3202,9 +3216,9 @@ function renderProductDetail(){
       ${productOfferNoticeHtml()}
       ${productOfferPriceHtml(product, inventoryVariant)}
       <div class="detail-option-card">
-        ${colorMode ? `<div class="option-block"><b>Choose colour</b><div class="color-variant-options">${product.Variants.map((v,i)=>{ const available = variantIsAvailable(v, product); const stockLabel = variantAvailabilityLabel(product, v); return `<button class="color-variant-choice ${i===activeVariantIndex?'active':''} ${available?'':'is-out-stock'}" type="button" onclick="selectColorVariant(${i})" aria-pressed="${i===activeVariantIndex?'true':'false'}" ${available?'':`title="View and share this out-of-stock colour"`}><span>${escapeHtml(v.color || v.label || 'Colour')}</span>${stockLabel?`<small class="variant-stock-label ${available?'is-available':''}">${escapeHtml(stockLabel)}</small>`:''}</button>`; }).join('')}</div></div>` : ''}
+        ${colorMode ? `<div class="option-block"><b>Choose colour</b><div class="color-variant-options">${product.Variants.map((v,i)=>{ const available = variantIsAvailable(v, product); const stockLabel = variantAvailabilityLabel(product, v); return `<button class="color-variant-choice ${i===activeVariantIndex?'active':''} ${available?'':'is-out-stock'}" type="button" onclick="selectColorVariant(${i})" aria-pressed="${i===activeVariantIndex?'true':'false'}" ${available?'':`disabled title="This colour is out of stock"`}><span>${escapeHtml(v.color || v.label || 'Colour')}</span>${stockLabel?`<small class="variant-stock-label ${available?'is-available':''}">${escapeHtml(stockLabel)}</small>`:''}</button>`; }).join('')}</div></div>` : ''}
         ${hasVariants ? `<div class="option-block"><b>Choose ${escapeHtml(optionTitle)}</b><div class="size-variant-options option-variant-options">${product.Variants.map((v,i)=>{ const available = variantIsAvailable(v, product); const stockLabel = variantAvailabilityLabel(product, v); return `<button class="size-variant-choice ${i===activeVariantIndex?'active':''} ${available?'':'is-out-stock'}" type="button" onclick="selectVariant(${i})" ${available?'':`title="View and share this out-of-stock option"`}><span>${escapeHtml(v.label || 'Standard')}</span>${stockLabel?`<small class="variant-stock-label ${available?'is-available':''}">${escapeHtml(stockLabel)}</small>`:''}</button>`; }).join('')}</div></div>` : ''}
-        ${colorMode && hasVisibleSizes(product, variant) ? `<div class="option-block"><b>Choose size</b><div class="size-variant-options">${sizeOptions.map((size,i)=>{ const child=sizeVariantForIndex(variant,i); const available=variantIsAvailable(child,product); const stockLabel=variantAvailabilityLabel(product,child); return `<button class="size-variant-choice ${i===activeSizeIndex?'active':''} ${available?'':'is-out-stock'}" type="button" onclick="selectSizeOption(${i})"><span>${escapeHtml(size)}</span>${stockLabel?`<small class="variant-stock-label ${available?'is-available':''}">${escapeHtml(stockLabel)}</small>`:''}</button>`; }).join('')}</div></div>` : ''}
+        ${colorMode && hasVisibleSizes(product, variant) ? `<div class="option-block"><b>Choose ${escapeHtml(optionTitle)}</b><div class="size-variant-options">${sizeOptions.map((size,i)=>{ const child=sizeVariantForIndex(variant,i); const available=variantIsAvailable(child,product); const stockLabel=variantAvailabilityLabel(product,child); return `<button class="size-variant-choice ${i===activeSizeIndex?'active':''} ${available?'':'is-out-stock'}" type="button" onclick="selectSizeOption(${i})" ${available?'':`disabled title="This ${escapeHtml(optionTitle.toLowerCase())} is out of stock"`}><span>${escapeHtml(size)}</span>${stockLabel?`<small class="variant-stock-label ${available?'is-available':''}">${escapeHtml(stockLabel)}</small>`:''}</button>`; }).join('')}</div></div>` : ''}
         ${!colorMode && colors.length ? `<div class="option-block"><b>Choose colour</b><div id="colorOptions" class="color-variant-options">${colors.map((c,i)=>`<button class="color-variant-choice ${i===activeColorIndex?'active':''}" type="button" onclick="activateColorChoice(this,${i})" aria-pressed="${i===activeColorIndex?'true':'false'}"><span>${escapeHtml(c)}</span></button>`).join('')}</div></div>` : ''}
         <div class="option-block"><b>Quantity</b><div class="qty"><button type="button" onclick="changeQty(-1)">−</button><span id="qty">1</span><button type="button" onclick="changeQty(1)">+</button></div></div>
       </div>
@@ -3442,6 +3456,7 @@ function handleAddToCart(){
     offerPrice: liveOffer ? money(liveOffer.offerPrice) : 0,
     offerStatus: liveOffer ? 'live' : '',
     subcategory: product.Subcategory,
+    optionTitle: productOptionTitle(product),
     terms: selectedPolicyTerms(product.Terms).map(term => term.label),
     stockStatus: variant.stockStatus || product.StockStatus || 'in_stock',
     trackInventory: product.TrackInventory === true,
@@ -3461,10 +3476,10 @@ function shareProductLink(){
 }
 function initCartPage(){
   if(window.WelloneCart && typeof WelloneCart.renderCartItems === 'function') WelloneCart.renderCartItems();
-  else renderCartItems();
+  else renderCartPageItems();
 }
-function renderCartItems(){
-  if(window.WelloneCart && WelloneCart.renderCartItems && WelloneCart.renderCartItems !== renderCartItems){
+function renderCartPageItems(){
+  if(window.WelloneCart && WelloneCart.renderCartItems && WelloneCart.renderCartItems !== renderCartPageItems){
     return WelloneCart.renderCartItems();
   }
 }

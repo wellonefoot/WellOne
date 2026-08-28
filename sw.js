@@ -1,16 +1,16 @@
 'use strict';
 
-const CACHE_VERSION = 'wellone-customer-v84-safe-assets';
+const CACHE_VERSION = 'wellone-customer-v85-safe-assets';
 const STATIC_CACHE = `${CACHE_VERSION}-static`;
 const IMAGE_CACHE = `${CACHE_VERSION}-images`;
 const STATIC_FILES = [
-  './css/style.css?v=84',
-  './js/store.bundle.js?v=84',
-  './js/basic.bundle.js?v=84',
-  './js/orders.bundle.js?v=84',
-  './js/pwa-install.js?v=84',
+  './css/style.css?v=85',
+  './js/store.bundle.js?v=85',
+  './js/basic.bundle.js?v=85',
+  './js/orders.bundle.js?v=85',
+  './js/pwa-install.js?v=85',
   './manifest.webmanifest',
-  './assets/logo.png?v=84',
+  './assets/logo.png?v=85',
   './assets/favicon/favicon.ico'
 ];
 
@@ -74,7 +74,7 @@ self.addEventListener('fetch', event => {
   if(isSupabase(url) && !isPublicStorage(url)) return;
 
   const sameOrigin = url.origin === self.location.origin;
-  const isVersionedStatic = sameOrigin && /(?:\?|&)v=84(?:&|$)/.test(url.search) &&
+  const isVersionedStatic = sameOrigin && /(?:\?|&)v=85(?:&|$)/.test(url.search) &&
     ['script','style','font','image'].includes(request.destination);
   const isStatic = sameOrigin && ['script','style','font','manifest'].includes(request.destination);
   const isImage = request.destination === 'image' || isPublicStorage(url);
