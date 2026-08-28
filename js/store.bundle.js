@@ -960,10 +960,10 @@ function sameName(a,b){ return cleanText(a).toLowerCase() === cleanText(b).toLow
 function normalizePrice(value){ return cleanText(value).replace(/^₹\s*/,'').replace(/,/g,''); }
 function money(value){ const n = Number(normalizePrice(value)); return Number.isFinite(n) && n > 0 ? n : 0; }
 function formatPrice(value){ const n = money(value); return n ? `₹${n}` : ''; }
-function cacheKey(name){ return 'wellone_supabase_v86_' + name; }
+function cacheKey(name){ return 'wellone_supabase_v88_' + name; }
 function clearLegacyStoreCaches(){
   try{
-    const oldPrefixes=['wellone_supabase_v85_','wellone_supabase_v84_','wellone_supabase_v83_','wellone_supabase_v82_','wellone_supabase_v81_'];
+    const oldPrefixes=['wellone_supabase_v86_','wellone_supabase_v85_','wellone_supabase_v84_','wellone_supabase_v83_','wellone_supabase_v82_','wellone_supabase_v81_'];
     const removals=[];
     for(let i=0;i<localStorage.length;i++){ const k=localStorage.key(i)||''; if(oldPrefixes.some(prefix=>k.startsWith(prefix))) removals.push(k); }
     removals.forEach(k=>localStorage.removeItem(k));
@@ -975,7 +975,7 @@ function readAnyCache(name){ try{ const raw = localStorage.getItem(cacheKey(name
 function readFastCache(name){ try{ const raw = localStorage.getItem(cacheKey(name)); if(!raw) return null; const pack = JSON.parse(raw); if(!pack || !pack.time || now() - pack.time > FAST_CACHE_MS) return null; return pack.data || null; }catch(e){ return null; } }
 function pruneWelloneCache(maxEntries = 42){
   try{
-    const prefix = 'wellone_supabase_v86_';
+    const prefix = 'wellone_supabase_v88_';
     const entries = [];
     for(let i=0;i<localStorage.length;i++){
       const key = localStorage.key(i);
@@ -996,7 +996,7 @@ function writeFastCache(name, data){
 }
 function clearLegacyWelloneCaches(){
   try{
-    const currentPrefix = 'wellone_supabase_v86_';
+    const currentPrefix = 'wellone_supabase_v88_';
     const removals = [];
     for(let i=0;i<localStorage.length;i++){
       const key = localStorage.key(i) || '';
@@ -1272,7 +1272,7 @@ function findProductInCachedPages(categoryName, productId){
 
 function removeStoreCacheEntries(predicate){
   try{
-    const prefix = 'wellone_supabase_v86_';
+    const prefix = 'wellone_supabase_v88_';
     const removals = [];
     for(let i=0;i<localStorage.length;i++){
       const key = localStorage.key(i) || '';
@@ -1367,11 +1367,14 @@ function handleAdminBroadcast(payload){
   }, 10);
 }
 function handleDatabaseChange(table, payload){
+  const row = (payload && (payload.new || payload.old)) || {};
+  const productId = table === 'products' ? cleanText(row.id) : ((table === 'product_variants' || table === 'product_images') ? cleanText(row.product_id) : '');
   emitStoreUpdate({
     tables:[table],
     eventType:cleanText(payload && payload.eventType) || 'DATABASE_CHANGE',
     source:'database',
-    eventId:''
+    eventId:'',
+    details:productId ? {productId} : null
   }, 90);
 }
 function scheduleStoreRealtimeReconnect(){
@@ -1848,16 +1851,19 @@ function restoreCatalogView(){
   const cached = readFastCache(catalogViewCacheName()) || readAnyCache(catalogViewCacheName());
   if(!cached || cached.fingerprint !== currentCatalogFingerprint() || !Array.isArray(cached.products) || !cached.products.length) return false;
   if(cached.savedAt && Date.now() - cached.savedAt > CATALOG_VIEW_TTL_MS) return false;
-  catalogState.products = cached.products;
-  catalogState.nextOffset = cached.nextOffset ?? null;
-  catalogState.offset = cached.offset || cached.nextOffset || catalogState.products.length;
-  rememberProducts(catalogState.products);
+  const restoredProducts = cached.products.slice(0, INITIAL_PAGE_LIMIT);
+  catalogState.products = restoredProducts;
+  const cachedHadMore = cached.products.length > INITIAL_PAGE_LIMIT || cached.nextOffset !== null && cached.nextOffset !== undefined;
+  catalogState.nextOffset = cachedHadMore ? restoredProducts.length : null;
+  catalogState.offset = restoredProducts.length;
+  rememberProducts(restoredProducts);
   grid.classList.remove('skeleton-grid');
-  grid.innerHTML = catalogState.products.map(p => productCard(p, p.Category || catalogState.category)).join('');
+  grid.innerHTML = restoredProducts.map(p => productCard(p, p.Category || catalogState.category)).join('');
   renderCategoryHero();
   updateCatalogAutoLoaderState();
-  requestAnimationFrame(() => setTimeout(() => window.scrollTo({top: cached.scrollY || 0, behavior:'auto'}), 40));
-  return cached;
+  // Performance rule: never restore dozens of old cards at once. Re-enter with 20 and continue on scroll.
+  requestAnimationFrame(() => setTimeout(() => window.scrollTo({top:0, behavior:'auto'}), 20));
+  return {...cached, scrollY:0, products:restoredProducts};
 }
 function findProductInState(categoryName, productId){
   const id = cleanText(productId);
@@ -2477,7 +2483,7 @@ function updateCatalogAutoLoaderState(){
 function maybeLoadNextCatalogPage(){
   if(catalogState.loading) return;
   if(catalogState.nextOffset === null || catalogState.nextOffset === undefined) return;
-  loadCatalogProducts(false, {forceRefresh:true});
+  loadCatalogProducts(false, {forceRefresh:false});
 }
 function setupCatalogAutoLoader(){
   const loader = document.getElementById('catalogAutoLoader');
@@ -2486,14 +2492,14 @@ function setupCatalogAutoLoader(){
   if('IntersectionObserver' in window){
     catalogAutoObserver = new IntersectionObserver(entries => {
       if(entries.some(entry => entry.isIntersecting)) maybeLoadNextCatalogPage();
-    }, {root:null, rootMargin:'500px 0px 500px', threshold:0.01});
+    }, {root:null, rootMargin:'320px 0px 320px', threshold:0.01});
     catalogAutoObserver.observe(loader);
     return;
   }
   catalogAutoScrollHandler = () => {
     if(catalogState.loading || catalogState.nextOffset === null || catalogState.nextOffset === undefined) return;
     const rect = loader.getBoundingClientRect();
-    if(rect.top <= window.innerHeight + 500) maybeLoadNextCatalogPage();
+    if(rect.top <= window.innerHeight + 320) maybeLoadNextCatalogPage();
   };
   window.addEventListener('scroll', catalogAutoScrollHandler, {passive:true});
   window.addEventListener('resize', catalogAutoScrollHandler, {passive:true});
@@ -2542,8 +2548,8 @@ async function initCatalog(){
     await loadCatalogProducts(true, {
       silent: true,
       forceRefresh: false,
-      limit: Math.max(INITIAL_PAGE_LIMIT, catalogState.products.length),
-      preserveScrollY: Number(restored.scrollY || 0)
+      limit: INITIAL_PAGE_LIMIT,
+      preserveScrollY: 0
     });
   }else{
     await loadCatalogProducts(true, {forceRefresh:false});
@@ -2795,6 +2801,40 @@ async function loadCatalogProducts(reset, behavior = {}){
     setTimeout(refreshVisibleCatalogFromNetwork, 0);
   }
 }
+function liveProductIdsFromChange(change){
+  const changes = Array.isArray(change?.changes) ? change.changes : [];
+  return uniqueClean(changes.map(item => cleanText(item?.details?.productId)).filter(Boolean));
+}
+async function refreshCatalogProductsById(productIds){
+  const ids = uniqueClean(productIds || []);
+  if(!ids.length || !catalogState.products.length) return false;
+  const loaded = new Set(catalogState.products.map(product => cleanText(product.ID)));
+  const relevant = ids.filter(id => loaded.has(id));
+  if(!relevant.length) return false;
+  const {data,error} = await supabaseClient().from('products').select(PRODUCT_LIST_SELECT).eq('status','active').in('id', relevant);
+  if(error) throw error;
+  const freshProducts = normalizeProducts(data || []);
+  const freshById = new Map(freshProducts.map(product => [cleanText(product.ID), product]));
+  const grid = document.getElementById('productGrid');
+  relevant.forEach(id => {
+    const index = catalogState.products.findIndex(product => cleanText(product.ID) === id);
+    if(index < 0) return;
+    const fresh = freshById.get(id);
+    const stillMatchesCategory = fresh && (!catalogState.category || sameName(fresh.Category, catalogState.category));
+    const stillMatchesSubcategory = fresh && (!catalogState.subcategory || sameName(fresh.Subcategory, catalogState.subcategory));
+    if(!fresh || !stillMatchesCategory || !stillMatchesSubcategory){
+      catalogState.products.splice(index,1);
+      Array.from(grid?.querySelectorAll('[data-product-id]') || []).find(node => cleanText(node.dataset.productId) === id)?.remove();
+      return;
+    }
+    catalogState.products[index] = fresh;
+    rememberProduct(fresh);
+    const node = Array.from(grid?.querySelectorAll('[data-product-id]') || []).find(item => cleanText(item.dataset.productId) === id);
+    if(node) patchProductCardNode(node, fresh, fresh.Category || catalogState.category);
+  });
+  persistCatalogView();
+  return true;
+}
 function bindCatalogLiveUpdates(){
   if(window.__welloneCatalogLiveBound || typeof subscribeToStoreUpdates !== 'function') return;
   window.__welloneCatalogLiveBound = true;
@@ -2813,21 +2853,41 @@ function bindCatalogLiveUpdates(){
       if(catalogState.category && (has('subcategories') || has('products'))){
         await renderFilterChips({forceRefresh:true, reloadIfSelectionRemoved:true, allowEmpty:true}).catch(()=>{});
       }
+      if(has('products') || has('product_variants') || has('product_images')){
+        const ids = liveProductIdsFromChange(change);
+        if(ids.length){
+          const patched = await refreshCatalogProductsById(ids).catch(()=>false);
+          if(patched) return;
+        }
+      }
       if(has('products') || has('product_variants') || has('product_images') || has('categories') || has('subcategories')){
         refreshVisibleCatalogFromNetwork();
       }
     }, 120);
   });
 }
-function refreshVisibleCatalogFromNetwork(){
+async function refreshVisibleCatalogFromNetwork(){
   if(!document.getElementById('productGrid') || (!catalogState.category && !catalogState.query)) return;
   if(catalogState.loading){ catalogRefreshPending = true; return; }
-  loadCatalogProducts(true, {
-    silent: true,
-    forceRefresh: true,
-    limit: Math.max(INITIAL_PAGE_LIMIT, catalogState.products.length || 0),
-    preserveScrollY: window.scrollY || 0
-  });
+  // Refresh only the first 20 from the network. If the user already scrolled deeper,
+  // keep later pages in the DOM instead of re-downloading 60/100 products at once.
+  if((catalogState.products || []).length <= INITIAL_PAGE_LIMIT){
+    loadCatalogProducts(true, {silent:true, forceRefresh:true, limit:INITIAL_PAGE_LIMIT, preserveScrollY:window.scrollY || 0});
+    return;
+  }
+  const fingerprint = currentCatalogFingerprint();
+  try{
+    const options = {offset:0,limit:INITIAL_PAGE_LIMIT,query:catalogState.query,subcategory:catalogState.subcategory,sort:catalogState.sort,useCache:false,forceRefresh:true};
+    const pack = catalogState.global ? await searchGlobalProducts(catalogState.query, options) : await loadCategoryPage(catalogState.category, options);
+    if(fingerprint !== currentCatalogFingerprint()) return;
+    const firstPage = pack.products || [];
+    const firstIds = new Set(firstPage.map(product => cleanText(product.ID)));
+    const tail = catalogState.products.slice(INITIAL_PAGE_LIMIT).filter(product => !firstIds.has(cleanText(product.ID)));
+    catalogState.products = firstPage.concat(tail);
+    rememberProducts(firstPage);
+    patchProductGrid(document.getElementById('productGrid'), catalogState.products);
+    persistCatalogView();
+  }catch(_error){}
 }
 
 function openSortSheet(){
