@@ -34,7 +34,10 @@ function cartPriceText(value, fallback = 'Ask price'){
   return n ? `₹${n.toLocaleString('en-IN')}` : fallback;
 }
 function cartItemKey(item){
-  return [item.category, item.id, item.name, item.variant || item.size, item.color]
+  const productId=cartText(item?.id).toLowerCase();
+  const variantId=cartText(item?.variantId || item?.variant_id).toLowerCase();
+  if(variantId) return `variant||${productId}||${variantId}`;
+  return [item?.category, productId, item?.name, item?.variant || item?.size, item?.color]
     .map(v => cartText(v).toLowerCase()).join('||');
 }
 function cartEscape(value){
@@ -291,7 +294,7 @@ function clearSubmittedOrderCart(confirmedItems = []){
   saveCart(next);
 }
 function finishPendingOrderCartClear(){
-  // v85 could leave this marker behind and later empty a newly-created cart.
+  // Older builds could leave this marker behind and later empty a newly-created cart.
   // Clearing the marker without touching cart contents safely repairs that state.
   localStorage.removeItem(ORDER_CART_CLEAR_KEY);
 }
@@ -911,7 +914,7 @@ let termsCache = null;
 let offersCache = null;
 let offerItemsCache = null;
 const productCacheByKey = new Map();
-const FAST_CACHE_MS = 2 * 60 * 1000; // fast repeat visits; live store events explicitly invalidate affected data
+const FAST_CACHE_MS = 12 * 1000; // instant repeat navigation, with near-live fallback even if realtime reconnects // fast repeat visits; live store events explicitly invalidate affected data
 const STORE_CHANNEL_NAME = 'wellone-store-events-v1';
 const STORE_EVENT_NAME = 'store-change';
 const storeUpdateListeners = new Set();
@@ -957,13 +960,22 @@ function sameName(a,b){ return cleanText(a).toLowerCase() === cleanText(b).toLow
 function normalizePrice(value){ return cleanText(value).replace(/^₹\s*/,'').replace(/,/g,''); }
 function money(value){ const n = Number(normalizePrice(value)); return Number.isFinite(n) && n > 0 ? n : 0; }
 function formatPrice(value){ const n = money(value); return n ? `₹${n}` : ''; }
-function cacheKey(name){ return 'wellone_supabase_v85_' + name; }
+function cacheKey(name){ return 'wellone_supabase_v86_' + name; }
+function clearLegacyStoreCaches(){
+  try{
+    const oldPrefixes=['wellone_supabase_v85_','wellone_supabase_v84_','wellone_supabase_v83_','wellone_supabase_v82_','wellone_supabase_v81_'];
+    const removals=[];
+    for(let i=0;i<localStorage.length;i++){ const k=localStorage.key(i)||''; if(oldPrefixes.some(prefix=>k.startsWith(prefix))) removals.push(k); }
+    removals.forEach(k=>localStorage.removeItem(k));
+  }catch(_e){}
+}
+clearLegacyStoreCaches();
 function now(){ return Date.now(); }
 function readAnyCache(name){ try{ const raw = localStorage.getItem(cacheKey(name)); if(!raw) return null; const pack = JSON.parse(raw); return pack && pack.data ? pack.data : null; }catch(e){ return null; } }
 function readFastCache(name){ try{ const raw = localStorage.getItem(cacheKey(name)); if(!raw) return null; const pack = JSON.parse(raw); if(!pack || !pack.time || now() - pack.time > FAST_CACHE_MS) return null; return pack.data || null; }catch(e){ return null; } }
 function pruneWelloneCache(maxEntries = 42){
   try{
-    const prefix = 'wellone_supabase_v85_';
+    const prefix = 'wellone_supabase_v86_';
     const entries = [];
     for(let i=0;i<localStorage.length;i++){
       const key = localStorage.key(i);
@@ -984,7 +996,7 @@ function writeFastCache(name, data){
 }
 function clearLegacyWelloneCaches(){
   try{
-    const currentPrefix = 'wellone_supabase_v85_';
+    const currentPrefix = 'wellone_supabase_v86_';
     const removals = [];
     for(let i=0;i<localStorage.length;i++){
       const key = localStorage.key(i) || '';
@@ -1260,7 +1272,7 @@ function findProductInCachedPages(categoryName, productId){
 
 function removeStoreCacheEntries(predicate){
   try{
-    const prefix = 'wellone_supabase_v85_';
+    const prefix = 'wellone_supabase_v86_';
     const removals = [];
     for(let i=0;i<localStorage.length;i++){
       const key = localStorage.key(i) || '';

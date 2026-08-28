@@ -34,7 +34,10 @@ function cartPriceText(value, fallback = 'Ask price'){
   return n ? `₹${n.toLocaleString('en-IN')}` : fallback;
 }
 function cartItemKey(item){
-  return [item.category, item.id, item.name, item.variant || item.size, item.color]
+  const productId=cartText(item?.id).toLowerCase();
+  const variantId=cartText(item?.variantId || item?.variant_id).toLowerCase();
+  if(variantId) return `variant||${productId}||${variantId}`;
+  return [item?.category, productId, item?.name, item?.variant || item?.size, item?.color]
     .map(v => cartText(v).toLowerCase()).join('||');
 }
 function cartEscape(value){
@@ -274,17 +277,20 @@ function clearCart(){
   if(typeof renderCartItems === 'function') renderCartItems();
   showSoftToast('Cart cleared');
 }
-function clearSubmittedOrderCart(){
-  localStorage.setItem(ORDER_CART_CLEAR_KEY, String(Date.now()));
-  localStorage.setItem(CART_KEY, '[]');
-  clearLegacyCartKeys();
-  updateCartCount([]);
-  if(typeof renderCartItems === 'function') renderCartItems();
+function clearSubmittedOrderCart(confirmedItems = []){
+  const submitted = normalizeCart(confirmedItems);
+  const removeQty = new Map(submitted.map(item => [cartItemKey(item), Math.max(1, cartNumber(item.qty, 1))]));
+  const next = [];
+  getCart().forEach(item => {
+    const key = cartItemKey(item);
+    const remaining = Math.max(0, Math.floor(cartNumber(item.qty, 1)) - (removeQty.get(key) || 0));
+    if(remaining > 0) next.push({...item, qty:remaining});
+  });
+  localStorage.removeItem(ORDER_CART_CLEAR_KEY);
+  saveCart(next);
 }
 function finishPendingOrderCartClear(){
-  if(!localStorage.getItem(ORDER_CART_CLEAR_KEY)) return;
-  localStorage.setItem(CART_KEY, '[]');
-  clearLegacyCartKeys();
+  // Never delete cart contents during navigation/pageshow. Old versions left this marker behind.
   localStorage.removeItem(ORDER_CART_CLEAR_KEY);
 }
 function cartItemHtml(item, index){
@@ -674,7 +680,7 @@ async function confirmOrderToDatabase(source = 'auto'){
     if(error) throw error;
     if(!data?.order_id || !data?.tracking_token) throw new Error('Order confirmation did not return a tracking reference.');
     saveOrderRef(data);
-    clearSubmittedOrderCart();
+    clearSubmittedOrderCart(cart);
     broadcastCustomerStockChange('customer-order-confirmed').catch(()=>{});
     window.location.assign(`order-confirmed.html?id=${encodeURIComponent(data.order_id)}`);
   }catch(error){
