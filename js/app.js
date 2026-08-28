@@ -1204,6 +1204,13 @@ function selectedProductVariant(product = activeProduct){
   if(!product) return {};
   return product.Variants[activeVariantIndex] || product.Variants[0] || {};
 }
+function sizeVariantForIndex(variant, index = activeSizeIndex){
+  const list = Array.isArray(variant && variant.sizeVariants) ? variant.sizeVariants : [];
+  return list[index] || list[0] || variant || {};
+}
+function selectedInventoryVariant(product = activeProduct, variant = selectedProductVariant(product)){
+  return isColorVariantMode(product) ? sizeVariantForIndex(variant, activeSizeIndex) : (variant || {});
+}
 function selectedSizeOptions(product = activeProduct, variant = selectedProductVariant(product)){
   const list = Array.isArray(variant && variant.sizeOptions) ? variant.sizeOptions.map(cleanText).filter(Boolean) : [];
   if(list.length) return list;
@@ -1267,7 +1274,9 @@ function applyProductSelectionFromUrl(product, params = new URLSearchParams(loca
   const variant = selectedProductVariant(product);
   const sizes = selectedSizeOptions(product, variant);
   const sizeIndex = wantedSize ? sizes.findIndex(size => cleanKey(size) === cleanKey(wantedSize)) : -1;
-  activeSizeIndex = sizeIndex >= 0 ? sizeIndex : 0;
+  const exactSizes = Array.isArray(variant?.sizeVariants) ? variant.sizeVariants : [];
+  const firstAvailableSize = exactSizes.findIndex(item => variantIsAvailable(item, product));
+  activeSizeIndex = sizeIndex >= 0 ? sizeIndex : (firstAvailableSize >= 0 ? firstAvailableSize : 0);
   const colors = standaloneColors(product);
   const colorIndex = wantedColor ? colors.findIndex(color => cleanKey(color) === cleanKey(wantedColor)) : -1;
   activeColorIndex = colorIndex >= 0 ? colorIndex : 0;
@@ -1295,7 +1304,7 @@ function selectedProductDescriptor(product = activeProduct){
   }
   return parts.join(' • ');
 }
-function updateProductSeo(product = activeProduct, variant = selectedProductVariant(product), images = productGalleryImages(product, variant)){
+function updateProductSeo(product = activeProduct, variant = selectedInventoryVariant(product, selectedProductVariant(product)), images = productGalleryImages(product, variant)){
   if(!product || !document.body.classList.contains('product-page')) return;
   const descriptor = selectedProductDescriptor(product);
   const title = `${product.Name}${descriptor ? ' - ' + descriptor : ''} | Wellone`;
@@ -1458,7 +1467,7 @@ function productGalleryTouchEnd(event){
   productGalleryDidSwipe = true;
   setTimeout(() => { productGalleryDidSwipe = false; }, 420);
   const variant = activeProduct.Variants[activeVariantIndex] || activeProduct.Variants[0] || {};
-  const images = productGalleryImages(activeProduct, variant);
+  const images = productGalleryImages(activeProduct, selectedInventoryVariant(activeProduct, variant));
   if(images.length < 2) return;
   activeImageIndex = (activeImageIndex + (dx < 0 ? 1 : -1) + images.length) % images.length;
   renderProductDetail();
@@ -1470,8 +1479,9 @@ function renderProductDetail(){
   const variant = selectedProductVariant(product);
   const colorMode = isColorVariantMode(product);
   const sizeOptions = selectedSizeOptions(product, variant);
+  const inventoryVariant = selectedInventoryVariant(product, variant);
   if(activeSizeIndex >= sizeOptions.length) activeSizeIndex = 0;
-  const images = productGalleryImages(product, variant);
+  const images = productGalleryImages(product, inventoryVariant);
   if(activeImageIndex >= images.length) activeImageIndex = 0;
   const activeImage = optimizeImageUrl(images[activeImageIndex] || product.Image || fallbackImageSync(product.Category), 1000);
   const colorsRaw = splitOptions(product.Colors || '');
@@ -1488,21 +1498,21 @@ function renderProductDetail(){
       <h1>${escapeHtml(product.Name)}</h1>
       ${product.Description ? `<p class="muted detail-description">${escapeHtml(product.Description)}</p>` : ''}
       ${productOfferNoticeHtml()}
-      ${productOfferPriceHtml(product, variant)}
+      ${productOfferPriceHtml(product, inventoryVariant)}
       <div class="detail-option-card">
         ${colorMode ? `<div class="option-block"><b>Choose colour</b><div class="color-variant-options">${product.Variants.map((v,i)=>{ const available = variantIsAvailable(v, product); const stockLabel = variantAvailabilityLabel(product, v); return `<button class="color-variant-choice ${i===activeVariantIndex?'active':''} ${available?'':'is-out-stock'}" type="button" onclick="selectColorVariant(${i})" aria-pressed="${i===activeVariantIndex?'true':'false'}" ${available?'':`title="View and share this out-of-stock colour"`}><span>${escapeHtml(v.color || v.label || 'Colour')}</span>${stockLabel?`<small class="variant-stock-label ${available?'is-available':''}">${escapeHtml(stockLabel)}</small>`:''}</button>`; }).join('')}</div></div>` : ''}
         ${hasVariants ? `<div class="option-block"><b>Choose ${escapeHtml(optionTitle)}</b><div class="size-variant-options option-variant-options">${product.Variants.map((v,i)=>{ const available = variantIsAvailable(v, product); const stockLabel = variantAvailabilityLabel(product, v); return `<button class="size-variant-choice ${i===activeVariantIndex?'active':''} ${available?'':'is-out-stock'}" type="button" onclick="selectVariant(${i})" ${available?'':`title="View and share this out-of-stock option"`}><span>${escapeHtml(v.label || 'Standard')}</span>${stockLabel?`<small class="variant-stock-label ${available?'is-available':''}">${escapeHtml(stockLabel)}</small>`:''}</button>`; }).join('')}</div></div>` : ''}
-        ${colorMode && hasVisibleSizes(product, variant) ? `<div class="option-block"><b>Choose size</b><div class="size-variant-options">${sizeOptions.map((size,i)=>`<button class="size-variant-choice ${i===activeSizeIndex?'active':''}" type="button" onclick="selectSizeOption(${i})">${escapeHtml(size)}</button>`).join('')}</div></div>` : ''}
+        ${colorMode && hasVisibleSizes(product, variant) ? `<div class="option-block"><b>Choose size</b><div class="size-variant-options">${sizeOptions.map((size,i)=>{ const child=sizeVariantForIndex(variant,i); const available=variantIsAvailable(child,product); const stockLabel=variantAvailabilityLabel(product,child); return `<button class="size-variant-choice ${i===activeSizeIndex?'active':''} ${available?'':'is-out-stock'}" type="button" onclick="selectSizeOption(${i})"><span>${escapeHtml(size)}</span>${stockLabel?`<small class="variant-stock-label ${available?'is-available':''}">${escapeHtml(stockLabel)}</small>`:''}</button>`; }).join('')}</div></div>` : ''}
         ${!colorMode && colors.length ? `<div class="option-block"><b>Choose colour</b><div id="colorOptions" class="color-variant-options">${colors.map((c,i)=>`<button class="color-variant-choice ${i===activeColorIndex?'active':''}" type="button" onclick="activateColorChoice(this,${i})" aria-pressed="${i===activeColorIndex?'true':'false'}"><span>${escapeHtml(c)}</span></button>`).join('')}</div></div>` : ''}
         <div class="option-block"><b>Quantity</b><div class="qty"><button type="button" onclick="changeQty(-1)">−</button><span id="qty">1</span><button type="button" onclick="changeQty(1)">+</button></div></div>
       </div>
       ${terms.length ? `<section class="product-policy-section" aria-label="Product policies"><p class="product-policy-title">Product policies</p><div class="terms-grid compact-terms stylish-terms">${terms.map(term => `<article><span class="term-icon">${policyIconSvg(term.key)}</span><span class="term-copy"><b>${escapeHtml(term.label)}</b><small>${escapeHtml(term.description)}</small></span></article>`).join('')}</div></section>` : ''}
-      ${productStockNote(product, variant)}
-      <button class="btn primary full add-cart-button" ${productIsAvailable(product, variant) ? 'onclick="handleAddToCart()"' : 'disabled'}>${productIsAvailable(product, variant) ? 'Add to Cart' : 'Out of stock'}</button>
+      ${productStockNote(product, inventoryVariant)}
+      <button class="btn primary full add-cart-button" ${productIsAvailable(product, inventoryVariant) ? 'onclick="handleAddToCart()"' : 'disabled'}>${productIsAvailable(product, inventoryVariant) ? 'Add to Cart' : 'Out of stock'}</button>
       <div class="detail-mini-actions"><button class="share-product-btn" type="button" onclick="shareProductLink()">Share selected option</button></div>
     </div>`;
   syncProductSelectionUrl(product);
-  updateProductSeo(product, variant, images);
+  updateProductSeo(product, inventoryVariant, images);
 }
 let productImageZoomLevel = 1;
 let productImagePinchStartDistance = 0;
@@ -1512,7 +1522,7 @@ let productImagePinchStartContentY = 0;
 let productImagePinchDidZoom = false;
 function currentProductGallery(){
   if(!activeProduct) return [];
-  return productGalleryImages(activeProduct, selectedProductVariant(activeProduct));
+  return productGalleryImages(activeProduct, selectedInventoryVariant(activeProduct, selectedProductVariant(activeProduct)));
 }
 function productImageZoomSource(){
   const images = currentProductGallery();
@@ -1670,12 +1680,14 @@ function selectColorVariant(index){
   const variant = activeProduct?.Variants?.[index];
   if(!variant) return;
   activeVariantIndex = index;
-  activeSizeIndex = 0;
+  const exactSizes = Array.isArray(variant.sizeVariants) ? variant.sizeVariants : [];
+  const firstAvailableSize = exactSizes.findIndex(item => variantIsAvailable(item, activeProduct));
+  activeSizeIndex = firstAvailableSize >= 0 ? firstAvailableSize : 0;
   activeImageIndex = 0;
   renderProductDetail();
   if(!variantIsAvailable(variant)) showSoftToast('Out of stock — link can still be shared');
 }
-function selectSizeOption(index){ activeSizeIndex = index; renderProductDetail(); }
+function selectSizeOption(index){ activeSizeIndex = index; renderProductDetail(); if(!variantIsAvailable(selectedInventoryVariant(activeProduct, selectedProductVariant(activeProduct)), activeProduct)) showSoftToast('This size is out of stock'); }
 function activateChip(button){
   button.parentElement.querySelectorAll('.chip').forEach(chip => chip.classList.remove('active'));
   button.classList.add('active');
@@ -1693,7 +1705,7 @@ function changeQty(amount){
   if(!qty) return;
   const current = Math.max(1, Number(qty.textContent || 1));
   let next = Math.max(1, current + Number(amount || 0));
-  const stock = selectedStockQuantity(activeProduct, selectedProductVariant(activeProduct));
+  const stock = selectedStockQuantity(activeProduct, selectedInventoryVariant(activeProduct, selectedProductVariant(activeProduct)));
   if(stock !== null && next > stock){
     next = Math.max(1, stock);
     if(Number(amount || 0) > 0) showSoftToast(stock === 1 ? 'Only 1 left in stock' : `Only ${stock} left in stock`);
@@ -1703,19 +1715,21 @@ function changeQty(amount){
 function handleAddToCart(){
   const product = activeProduct;
   if(!product) return;
-  const variant = selectedProductVariant(product);
+  const variantGroup = selectedProductVariant(product);
+  const variant = selectedInventoryVariant(product, variantGroup);
   if(!productIsAvailable(product, variant)){ showSoftToast('This selected option is out of stock'); return; }
   const colorMode = isColorVariantMode(product);
   const gallery = productGalleryImages(product, variant);
   const image = firstImage(gallery, product.Image);
-  const size = colorMode ? selectedSizeText() : (variant.label || 'Standard');
-  const color = colorMode ? (variant.color || variant.label || 'Default') : selectedStandaloneColorText(product);
+  const size = colorMode ? (variant.size || variant.label || selectedSizeText()) : (variant.label || 'Standard');
+  const color = colorMode ? (variantGroup.color || variant.color || variantGroup.label || 'Default') : selectedStandaloneColorText(product);
   const regularPrice = money(variant.price || product.Price) || money(variant.mrp || product.MRP);
   const liveOffer = offerItemIsLive(activeOfferItem) ? activeOfferItem : null;
   addCartItem(product, {
     category: product.Category,
     image,
     variant:size,
+    variantId: variant.id || '',
     size,
     color,
     qty: document.getElementById('qty')?.textContent || 1,

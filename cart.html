@@ -25,7 +25,7 @@
   <meta name="twitter:image" content="https://wellone.in/assets/logo.png">
   <link rel="sitemap" type="application/xml" href="https://wellone.in/sitemap.xml">
   <!-- /SEO v54 -->
-  <link rel="stylesheet" href="css/style.css?v=78">
+  <link rel="stylesheet" href="css/style.css?v=79">
   <link rel="icon" href="./assets/favicon/favicon.ico" type="image/x-icon">
   <link rel="apple-touch-icon" href="./assets/favicon/apple-icon-180x180.png">
   <link rel="manifest" href="manifest.webmanifest">
@@ -41,7 +41,7 @@
       <button class="header-back" type="button" data-header-back aria-label="Go back" title="Back">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.5 5.5 8 12l6.5 6.5"></path></svg>
       </button>
-      <a class="brand" href="index.html" aria-label="Wellone home"><img src="assets/logo.png?v=74" alt="Wellone logo" width="3144" height="824" decoding="async" fetchpriority="high"></a>
+      <a class="brand" href="index.html" aria-label="Wellone home"><img src="assets/logo.png?v=79" alt="Wellone logo" width="3144" height="824" decoding="async" fetchpriority="high"></a>
       <nav class="nav" aria-label="Main navigation"><a href="index.html">Home</a><a href="about.html">About Us</a><a href="contact.html">Contact Us</a></nav>
       <div class="header-actions">
         <a class="header-icon header-search" href="catalog.html" aria-label="Search products">
@@ -70,7 +70,8 @@
           <label>Name<input id="customerName" placeholder="Your name"></label>
           <label>Phone<input id="customerPhone" placeholder="Your phone"></label>
           <label>Address<textarea id="customerAddress" rows="3" placeholder="Delivery address"></textarea></label>
-          <button class="btn primary full whatsapp-checkout" type="button" onclick="checkoutWhatsApp('page')">Place Order</button>
+          <label>Payment<select id="paymentMethod"><option value="cod">Cash on delivery</option><option value="online">Online payment</option></select></label>
+          <button class="btn primary full whatsapp-checkout" type="button" onclick="checkoutWhatsApp('page')">Confirm Order</button>
         </div>
         <button class="btn light full" type="button" onclick="clearCart()" style="margin-top:10px">Clear Cart</button>
       </aside>
@@ -78,11 +79,11 @@
   </main>
   <footer>© 2026 Wellone Fancy & Footwear.</footer>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="js/config.js?v=78"></script>
-  <script src="js/cart.js?v=78"></script>
-  <script src="js/supabase-data.js?v=78"></script>
-  <script src="js/app.js?v=78"></script>
+  <script src="js/config.js?v=79"></script>
+  <script src="js/cart.js?v=79"></script>
+  <script src="js/supabase-data.js?v=79"></script>
+  <script src="js/app.js?v=79"></script>
   <script>initCartPage();</script>
-  <script src="js/pwa-install.js?v=78"></script>
+  <script src="js/pwa-install.js?v=79"></script>
 </body>
 </html>

@@ -28,7 +28,7 @@ const PRODUCT_DETAIL_SELECT = `
   categories(id,name,image_url),
   subcategories(id,name),
   product_images(id,image_url,storage_path,sort_order),
-  product_variants(id,label,mrp,price,image_url,image_urls,terms,unit,stock,stock_status,sort_order)
+  product_variants(id,label,color,size,mrp,price,image_url,image_urls,terms,unit,stock,stock_status,sort_order)
 `;
 const PRODUCT_LIST_SELECT = `
   id,name,slug,description,mrp,price,main_image_url,status,stock_status,stock_quantity,track_inventory,sizes,colors,option_title,terms,created_at,updated_at,sort_order,
@@ -219,14 +219,18 @@ function normalizeProduct(row){
     .sort((a,b)=>Number(a.sort_order||0)-Number(b.sort_order||0))
     .map(v => {
       const ownImages = parseImages((Array.isArray(v.image_urls) && v.image_urls.length ? v.image_urls : [v.image_url].filter(Boolean)));
-      const ownSizes = splitOptions(cleanText(v.label || '')).filter(Boolean);
+      const color = cleanText(v.color || v.unit || '');
+      const rawSize = cleanText(v.size || v.label || '');
+      const ownSizes = splitOptions(rawSize).filter(Boolean);
       return {
-        label: cleanText(v.label || ''),
-        color: cleanText(v.unit || ''),
+        id: cleanText(v.id || ''),
+        label: rawSize || 'Standard',
+        color,
+        size: rawSize || 'Standard',
         sizeOptions: ownSizes.length ? ownSizes : fallbackSizes,
         price: dbPrice(v.price || row.price),
         mrp: dbPrice(v.mrp || row.mrp),
-        unit: cleanText(v.unit || ''),
+        unit: color,
         images: ownImages.length ? ownImages : product.Images,
         hasOwnImages: ownImages.length > 0,
         terms: [],
@@ -242,48 +246,65 @@ function normalizeProduct(row){
   const colorDbVariants = dbVariants.filter(v => cleanText(v.color));
   const legacyDbVariants = dbVariants.filter(v => !cleanText(v.color));
   if(colorDbVariants.length){
-    const mainColors = splitOptions(product.Colors || '').filter(c => cleanKey(c) !== 'default');
-    const mergedColors = mainColors.map((color,i) => ({
-      label:color,
-      color,
-      sizeOptions:fallbackSizes,
-      price:product.Price,
-      mrp:product.MRP,
-      unit:color,
-      images:product.Images,
-      hasOwnImages:false,
-      terms:[],
-      ...syntheticInventory,
-      isBase:i === 0
-    }));
+    const groups = [];
     colorDbVariants.forEach(v => {
-      const existing = mergedColors.find(x => cleanKey(x.color) === cleanKey(v.color));
-      if(existing) Object.assign(existing, v, {label:v.color});
-      else mergedColors.push({...v, label:v.color});
+      const color = cleanText(v.color || 'Default');
+      let group = groups.find(x => cleanKey(x.color) === cleanKey(color));
+      if(!group){
+        group = {
+          id:v.id,
+          label:color,
+          color,
+          sizeOptions:[],
+          sizeVariants:[],
+          price:v.price || product.Price,
+          mrp:v.mrp || product.MRP,
+          unit:color,
+          images:v.images || product.Images,
+          hasOwnImages:v.hasOwnImages,
+          terms:[],
+          stock:0,
+          stockStatus:'out_of_stock',
+          trackInventory:product.TrackInventory,
+          inventorySource:'group'
+        };
+        groups.push(group);
+      }
+      const sizes = Array.isArray(v.sizeOptions) && v.sizeOptions.length ? v.sizeOptions : [v.size || v.label || 'Standard'];
+      sizes.forEach((size, index) => {
+        const child = {...v, size:cleanText(size || 'Standard'), label:cleanText(size || 'Standard'), sizeOptions:[cleanText(size || 'Standard')]};
+        // Old colour rows may contain a comma-separated size list but only one shared stock count.
+        // Keep the first child as the stock-owning record and mark the rest as legacy aliases.
+        if(index > 0 && sizes.length > 1){ child.id = v.id; child.legacySharedStock = true; }
+        group.sizeVariants.push(child);
+        if(!group.sizeOptions.some(x => cleanKey(x) === cleanKey(child.size))) group.sizeOptions.push(child.size);
+      });
+    });
+    const mainColors = splitOptions(product.Colors || '').filter(c => cleanKey(c) !== 'default');
+    mainColors.forEach(color => {
+      if(groups.some(g => cleanKey(g.color) === cleanKey(color))) return;
+      groups.push({label:color,color,sizeOptions:fallbackSizes,sizeVariants:[],price:product.Price,mrp:product.MRP,unit:color,images:product.Images,hasOwnImages:false,terms:[],...syntheticInventory});
+    });
+    groups.forEach(group => {
+      const uniqueStockRows = new Map();
+      group.sizeVariants.forEach(child => { if(child.id && !uniqueStockRows.has(child.id)) uniqueStockRows.set(child.id, child); });
+      const stockRows = [...uniqueStockRows.values()];
+      group.stock = stockRows.reduce((sum, child) => sum + Math.max(0, Number(child.stock || 0) || 0), 0);
+      group.stockStatus = !product.TrackInventory || stockRows.some(child => cleanText(child.stockStatus || 'in_stock') !== 'out_of_stock' && Number(child.stock || 0) > 0) ? 'in_stock' : 'out_of_stock';
     });
     product.VariantMode = 'color';
-    product.Variants = mergedColors;
+    product.Variants = groups;
   }else{
     const samePriceVariants = fallbackSizes.map((size,i) => ({
-      label:size,
-      color:'',
-      sizeOptions:[size],
-      price:product.Price,
-      mrp:product.MRP,
-      unit:'',
-      images:product.Images,
-      hasOwnImages:false,
-      terms:[],
-      ...syntheticInventory,
-      isBase:i === 0
+      id:'', label:size, size, color:'', sizeOptions:[size], price:product.Price, mrp:product.MRP, unit:'', images:product.Images, hasOwnImages:false, terms:[], ...syntheticInventory, isBase:i === 0
     }));
     if(legacyDbVariants.length){
       const merged = [...samePriceVariants];
       legacyDbVariants.forEach(v => {
-        const label = cleanText(v.label || 'Standard');
+        const label = cleanText(v.size || v.label || 'Standard');
         const existing = merged.find(x => cleanKey(x.label) === cleanKey(label));
-        if(existing) Object.assign(existing, v, {label, sizeOptions:[label]});
-        else merged.push({...v, label, sizeOptions:[label]});
+        if(existing) Object.assign(existing, v, {label, size:label, sizeOptions:[label]});
+        else merged.push({...v, label, size:label, sizeOptions:[label]});
       });
       product.Variants = merged;
     }else{
