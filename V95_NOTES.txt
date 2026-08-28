@@ -1,0 +1,11 @@
+WellOne Customer v95 — old-speed optimization on current features
+
+- Current v88 customer UI, content, offers, orders, exact variants, stock and cart logic are retained.
+- Restores the old customer's instant cached catalog return + saved scroll position.
+- Starts loading the next 20 catalog items earlier for smoother scrolling.
+- Versioned JS/CSS are long-cached and reused instantly between pages.
+- HTML, Supabase database/auth/realtime/functions are never served stale.
+- Product images use stale-while-revalidate with a bounded cache.
+- Navigation preload is enabled and current HTML is network-first with offline fallback only.
+- Current large store/order bundles are preloaded earlier without changing execution order.
+- No SQL changes are required for this optimization-only build.

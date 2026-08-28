@@ -1,13 +1,140 @@
 'use strict';
-const CACHE_VERSION='wellone-customer-v88-20page-live';
-const STATIC_CACHE=`${CACHE_VERSION}-static`;
-const IMAGE_CACHE=`${CACHE_VERSION}-images`;
-const STATIC_FILES=['./css/style.css?v=88', './js/store.bundle.js?v=88', './js/basic.bundle.js?v=88', './js/orders.bundle.js?v=88', './js/pwa-install.js?v=88', './manifest.webmanifest', './assets/logo.png?v=88'];
-self.addEventListener('install',event=>event.waitUntil((async()=>{const c=await caches.open(STATIC_CACHE);await Promise.allSettled(STATIC_FILES.map(f=>c.add(f)));await self.skipWaiting();})()));
-self.addEventListener('activate',event=>event.waitUntil((async()=>{const keys=await caches.keys();await Promise.all(keys.filter(k=>k.startsWith('wellone-customer-')&&!k.startsWith(CACHE_VERSION)).map(k=>caches.delete(k)));await self.clients.claim();})()));
-function urlOf(r){try{return new URL(r.url);}catch(_e){return null;}}
-function isSupabase(u){return Boolean(u&&u.hostname.endsWith('.supabase.co'));}
-function publicStorage(u){return isSupabase(u)&&u.pathname.includes('/storage/v1/object/public/');}
-async function networkFirst(r){const c=await caches.open(STATIC_CACHE);try{const res=await fetch(r,{cache:'no-cache'});if(res&&(res.ok||res.type==='opaque'))c.put(r,res.clone()).catch(()=>{});return res;}catch(error){const hit=await c.match(r);if(hit)return hit;throw error;}}
-async function imageCache(r){const c=await caches.open(IMAGE_CACHE);const hit=await c.match(r);if(hit)return hit;const res=await fetch(r);if(res&&(res.ok||res.type==='opaque')){c.put(r,res.clone()).catch(()=>{});c.keys().then(keys=>{if(keys.length>180)Promise.all(keys.slice(0,keys.length-180).map(k=>c.delete(k))).catch(()=>{});}).catch(()=>{});}return res;}
-self.addEventListener('fetch',event=>{const r=event.request;if(r.method!=='GET')return;if(r.mode==='navigate'||r.destination==='document')return;const u=urlOf(r);if(!u)return;if(isSupabase(u)&&!publicStorage(u))return;const same=u.origin===self.location.origin;const code=same&&['script','style','font','manifest'].includes(r.destination);const cdn=u.hostname==='cdn.jsdelivr.net'&&r.destination==='script';const image=r.destination==='image'||publicStorage(u);if(code||cdn){event.respondWith(networkFirst(r));return;}if(image)event.respondWith(imageCache(r));});
+const CACHE_VERSION = 'wellone-customer-v95-old-speed-new-features';
+const SHELL_CACHE = `${CACHE_VERSION}-shell`;
+const IMAGE_CACHE = `${CACHE_VERSION}-images`;
+const RUNTIME_CACHE = `${CACHE_VERSION}-runtime`;
+
+const SHELL_ASSETS = [
+  './', './index.html', './catalog.html', './product.html', './cart.html', './offers.html',
+  './orders.html', './order-confirmed.html', './about.html', './contact.html',
+  './css/style.css?v=95', './js/store.bundle.js?v=95', './js/basic.bundle.js?v=95',
+  './js/orders.bundle.js?v=95', './js/pwa-install.js?v=95', './manifest.webmanifest',
+  './assets/logo.png?v=95', './assets/favicon/favicon.ico',
+  './assets/favicon/wellone-icon-192-v46.png', './assets/favicon/wellone-icon-512-v46.png',
+  './assets/favicon/wellone-icon-192-maskable-v46.png', './assets/favicon/wellone-icon-512-maskable-v46.png'
+];
+
+self.addEventListener('install', event => {
+  event.waitUntil((async () => {
+    const cache = await caches.open(SHELL_CACHE);
+    await Promise.allSettled(SHELL_ASSETS.map(asset => cache.add(asset)));
+    await self.skipWaiting();
+  })());
+});
+
+self.addEventListener('activate', event => {
+  event.waitUntil((async () => {
+    const keys = await caches.keys();
+    await Promise.all(keys
+      .filter(key => key.startsWith('wellone-customer-') && !key.startsWith(CACHE_VERSION))
+      .map(key => caches.delete(key)));
+    if(self.registration.navigationPreload){
+      try{ await self.registration.navigationPreload.enable(); }catch(_e){}
+    }
+    await self.clients.claim();
+  })());
+});
+
+function urlOf(request){ try{ return new URL(request.url); }catch(_e){ return null; } }
+function isSupabase(url){ return Boolean(url && url.hostname.endsWith('.supabase.co')); }
+function isPublicStorage(url){ return isSupabase(url) && url.pathname.includes('/storage/v1/object/public/'); }
+function isSameOriginVersionedCode(request, url){
+  if(!url || url.origin !== self.location.origin) return false;
+  if(!['script','style','font'].includes(request.destination)) return false;
+  return /[?&]v=\d+/.test(url.search);
+}
+function navigationFallback(request){
+  const url = urlOf(request);
+  if(!url) return './index.html';
+  const page = url.pathname.split('/').pop() || 'index.html';
+  return `./${page}`;
+}
+async function trimCache(name, maxItems){
+  const cache = await caches.open(name);
+  const keys = await cache.keys();
+  if(keys.length <= maxItems) return;
+  await Promise.all(keys.slice(0, keys.length - maxItems).map(key => cache.delete(key)));
+}
+async function cacheFirst(request, cacheName = SHELL_CACHE){
+  const cache = await caches.open(cacheName);
+  const hit = await cache.match(request);
+  if(hit) return hit;
+  const response = await fetch(request);
+  if(response && (response.ok || response.type === 'opaque')) cache.put(request, response.clone()).catch(()=>{});
+  return response;
+}
+async function staleWhileRevalidate(request, cacheName = IMAGE_CACHE, maxItems = 220){
+  const cache = await caches.open(cacheName);
+  const hit = await cache.match(request);
+  const update = fetch(request).then(response => {
+    if(response && (response.ok || response.type === 'opaque')){
+      cache.put(request, response.clone()).then(() => trimCache(cacheName, maxItems)).catch(()=>{});
+    }
+    return response;
+  }).catch(() => hit);
+  return hit || update;
+}
+async function networkFirstDocument(request, preloadPromise){
+  const cache = await caches.open(SHELL_CACHE);
+  try{
+    const preloaded = preloadPromise ? await preloadPromise : null;
+    const response = preloaded || await fetch(request, {cache:'no-store'});
+    if(response && response.ok) cache.put(request, response.clone()).catch(()=>{});
+    return response;
+  }catch(_error){
+    return (await cache.match(request)) || (await cache.match(navigationFallback(request))) || Response.error();
+  }
+}
+async function networkFirst(request, cacheName = RUNTIME_CACHE){
+  const cache = await caches.open(cacheName);
+  try{
+    const response = await fetch(request, {cache:'no-store'});
+    if(response && (response.ok || response.type === 'opaque')){
+      cache.put(request, response.clone()).then(() => trimCache(cacheName, 80)).catch(()=>{});
+    }
+    return response;
+  }catch(_error){
+    return (await cache.match(request)) || Response.error();
+  }
+}
+
+self.addEventListener('fetch', event => {
+  const request = event.request;
+  if(request.method !== 'GET') return;
+  const url = urlOf(request);
+  if(!url) return;
+
+  // Database/auth/realtime/functions must always be live and must never be cached.
+  if(isSupabase(url) && !isPublicStorage(url)){
+    event.respondWith(fetch(request, {cache:'no-store'}));
+    return;
+  }
+
+  // Keep HTML fresh. Cache is only a fallback if the network genuinely fails.
+  if(request.mode === 'navigate' || request.destination === 'document'){
+    event.respondWith(networkFirstDocument(request, event.preloadResponse));
+    return;
+  }
+
+  // Versioned local JS/CSS is immutable until the version changes, so subsequent pages are instant.
+  if(isSameOriginVersionedCode(request, url)){
+    event.respondWith(cacheFirst(request, SHELL_CACHE));
+    return;
+  }
+
+  if(request.destination === 'manifest'){
+    event.respondWith(networkFirst(request, RUNTIME_CACHE));
+    return;
+  }
+
+  // Product/storage images appear instantly from cache and refresh silently in the background.
+  if(request.destination === 'image' || isPublicStorage(url)){
+    event.respondWith(staleWhileRevalidate(request, IMAGE_CACHE, 220));
+    return;
+  }
+
+  // Reuse the Supabase CDN library after first load while still refreshing it in the background.
+  if(url.hostname === 'cdn.jsdelivr.net' && request.destination === 'script'){
+    event.respondWith(staleWhileRevalidate(request, RUNTIME_CACHE, 40));
+  }
+});

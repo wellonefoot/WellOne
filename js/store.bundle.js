@@ -1851,19 +1851,18 @@ function restoreCatalogView(){
   const cached = readFastCache(catalogViewCacheName()) || readAnyCache(catalogViewCacheName());
   if(!cached || cached.fingerprint !== currentCatalogFingerprint() || !Array.isArray(cached.products) || !cached.products.length) return false;
   if(cached.savedAt && Date.now() - cached.savedAt > CATALOG_VIEW_TTL_MS) return false;
-  const restoredProducts = cached.products.slice(0, INITIAL_PAGE_LIMIT);
-  catalogState.products = restoredProducts;
-  const cachedHadMore = cached.products.length > INITIAL_PAGE_LIMIT || cached.nextOffset !== null && cached.nextOffset !== undefined;
-  catalogState.nextOffset = cachedHadMore ? restoredProducts.length : null;
-  catalogState.offset = restoredProducts.length;
-  rememberProducts(restoredProducts);
+  // Old fast customer behavior: restore the already-loaded catalog immediately,
+  // then let the current live-refresh logic update it in the background.
+  catalogState.products = cached.products;
+  catalogState.nextOffset = cached.nextOffset ?? null;
+  catalogState.offset = cached.offset || cached.nextOffset || catalogState.products.length;
+  rememberProducts(catalogState.products);
   grid.classList.remove('skeleton-grid');
-  grid.innerHTML = restoredProducts.map(p => productCard(p, p.Category || catalogState.category)).join('');
+  grid.innerHTML = catalogState.products.map(p => productCard(p, p.Category || catalogState.category)).join('');
   renderCategoryHero();
   updateCatalogAutoLoaderState();
-  // Performance rule: never restore dozens of old cards at once. Re-enter with 20 and continue on scroll.
-  requestAnimationFrame(() => setTimeout(() => window.scrollTo({top:0, behavior:'auto'}), 20));
-  return {...cached, scrollY:0, products:restoredProducts};
+  requestAnimationFrame(() => setTimeout(() => window.scrollTo({top: cached.scrollY || 0, behavior:'auto'}), 40));
+  return cached;
 }
 function findProductInState(categoryName, productId){
   const id = cleanText(productId);
@@ -2492,14 +2491,14 @@ function setupCatalogAutoLoader(){
   if('IntersectionObserver' in window){
     catalogAutoObserver = new IntersectionObserver(entries => {
       if(entries.some(entry => entry.isIntersecting)) maybeLoadNextCatalogPage();
-    }, {root:null, rootMargin:'320px 0px 320px', threshold:0.01});
+    }, {root:null, rootMargin:'500px 0px 500px', threshold:0.01});
     catalogAutoObserver.observe(loader);
     return;
   }
   catalogAutoScrollHandler = () => {
     if(catalogState.loading || catalogState.nextOffset === null || catalogState.nextOffset === undefined) return;
     const rect = loader.getBoundingClientRect();
-    if(rect.top <= window.innerHeight + 320) maybeLoadNextCatalogPage();
+    if(rect.top <= window.innerHeight + 500) maybeLoadNextCatalogPage();
   };
   window.addEventListener('scroll', catalogAutoScrollHandler, {passive:true});
   window.addEventListener('resize', catalogAutoScrollHandler, {passive:true});
