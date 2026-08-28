@@ -1,7 +1,4 @@
-WellOne Customer v83 — fixed/optimized
-- Separate deployment; index.html is at ZIP root.
-- v83 replaces the broken v82 navigation cache. Product/catalog/cart/offers/orders pages are never replaced by index.html.
-- Public product images are runtime-cached; live Supabase data remains network-fresh.
-- Old customer cache namespaces are removed automatically when v83 activates.
-- Customer colour + size stock, orders, offers, cancellation/history and realtime inventory logic remain.
-- No new database migration is required for this v83 performance/fix pass. If you never ran the earlier realtime setup, use supabase/09_realtime_exact_variant_sync.sql once.
+WellOne Customer v84 — safe navigation + optimized assets
+Deploy the CONTENTS of this ZIP at the site root.
+After deployment, open wellone.in and refresh once. The v84 worker activates immediately and removes old WellOne customer caches. HTML navigation is no longer handled by the service worker, preventing ERR_FAILED on catalog.html?cat=... and product.html?id=....
+No new SQL migration is required for this v84 fix.
