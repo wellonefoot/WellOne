@@ -412,7 +412,7 @@ async function getLiveCartProduct(item){
     const {data, error} = await client.from('products').select('id,name,mrp,price,status,stock_status,stock_quantity,track_inventory,main_image_url,sizes,colors,option_title,product_variants(id,label,unit,color,size,mrp,price,image_url,image_urls,stock,stock_status,sort_order)').eq('id', item.id).maybeSingle();
     if(error) throw error;
     if(!data) return null;
-    return {ID:data.id, Name:data.name, MRP:data.mrp, Price:data.price, Status:data.status, StockStatus:data.stock_status, TrackInventory:data.track_inventory === true, StockQuantity:Math.max(0, cartNumber(data.stock_quantity, 0)), Image:data.main_image_url, Sizes:data.sizes, Colors:data.colors, VariantMode:(data.product_variants||[]).some(v=>cartText(v.color || v.unit))?'color':'option', Variants:(data.product_variants||[]).map(v=>({id:cartText(v.id), label:cartText(v.size || v.label || 'Standard'), color:cartText(v.color || v.unit || ''), size:cartText(v.size || v.label || 'Standard'), sizeOptions:cartText(v.size || v.label).split(/[|,\n]+/).map(x=>x.trim()).filter(Boolean), price:v.price || data.price, mrp:v.mrp || data.mrp, images:(v.image_urls&&v.image_urls.length?v.image_urls:[v.image_url].filter(Boolean)), stock:Math.max(0, cartNumber(v.stock, 0)), stockStatus:cartText(v.stock_status || 'in_stock'), inventorySource:'variant'}))};
+    return {ID:data.id, Name:data.name, MRP:data.mrp, Price:data.price, Status:data.status, StockStatus:data.stock_status, TrackInventory:data.track_inventory === true, StockQuantity:Math.max(0, cartNumber(data.stock_quantity, 0)), Image:data.main_image_url, Sizes:data.sizes, Colors:data.colors, VariantMode:(data.product_variants||[]).some(v=>cartText(v.color || v.unit))?'color':'option', Variants:(data.product_variants||[]).filter(v=>cartText(v.stock_status || 'in_stock')!=='hidden').map(v=>({id:cartText(v.id), label:cartText(v.size || v.label || 'Standard'), color:cartText(v.color || v.unit || ''), size:cartText(v.size || v.label || 'Standard'), sizeOptions:cartText(v.size || v.label).split(/[|,\n]+/).map(x=>x.trim()).filter(Boolean), price:v.price || data.price, mrp:v.mrp || data.mrp, images:(v.image_urls&&v.image_urls.length?v.image_urls:[v.image_url].filter(Boolean)), stock:Math.max(0, cartNumber(v.stock, 0)), stockStatus:cartText(v.stock_status || 'in_stock'), inventorySource:'variant'}))};
   }
   return null;
 }
@@ -455,6 +455,35 @@ function cartInventoryVariants(live){
   });
   return exact;
 }
+function cartIsDefaultValue(value, fallback){
+  const v=cartText(value || fallback).toLowerCase();
+  return !v || v===String(fallback||'').toLowerCase();
+}
+function cartExactVariantMatch(live,item){
+  const variants=cartInventoryVariants(live);
+  if(!variants.length) return null;
+  const wantedId=cartText(item?.variantId || item?.variant_id);
+  const wantedColor=cartText(item?.color || 'Default');
+  const wantedSize=cartText(item?.size || item?.variant || 'Standard');
+  const colorRelevant=!cartIsDefaultValue(wantedColor,'Default');
+  const sizeRelevant=!cartIsDefaultValue(wantedSize,'Standard');
+  if(wantedId){
+    const byId=variants.find(v=>cartText(v.id)===wantedId);
+    if(byId){
+      const colorOk=!colorRelevant || cartText(byId.color || byId.unit || '').toLowerCase()===wantedColor.toLowerCase();
+      const sizeOk=!sizeRelevant || cartText(byId.size || byId.label || 'Standard').toLowerCase()===wantedSize.toLowerCase();
+      if(colorOk && sizeOk) return byId;
+    }
+  }
+  const candidates=variants.filter(v=>{
+    const vc=cartText(v.color || v.unit || '').toLowerCase();
+    const vs=cartText(v.size || v.label || 'Standard').toLowerCase();
+    return (!colorRelevant || vc===wantedColor.toLowerCase()) && (!sizeRelevant || vs===wantedSize.toLowerCase());
+  });
+  if(colorRelevant && sizeRelevant) return candidates[0] || null;
+  // If a dimension is missing, only auto-resolve when there is exactly one possible exact record.
+  return candidates.length===1 ? candidates[0] : null;
+}
 
 async function checkCartAvailabilityAndRefresh(){
   const cart = getCart();
@@ -483,33 +512,24 @@ async function checkCartAvailabilityAndRefresh(){
         const colorMode = live.VariantMode === 'color' || variants.some(v => cartText(v.color));
         const wantedSize = cartText(item.size || item.variant || 'Standard');
         const wantedColor = cartText(item.color || 'Default');
-        if(item.variantId) matched = variants.find(v => cartText(v.id) === cartText(item.variantId)) || null;
-        if(matched){
-          // Exact true colour + size combination selected from the product page.
-        }else if(colorMode){
-          matched = variants.find(v => cartText(v.color || v.label).toLowerCase() === wantedColor.toLowerCase() && (wantedSize.toLowerCase()==='standard' || cartText(v.size || v.label || 'Standard').toLowerCase()===wantedSize.toLowerCase()))
-            || variants.find(v => cartText(v.color || v.label).toLowerCase() === wantedColor.toLowerCase()) || null;
-          if(wantedColor.toLowerCase() !== 'default' && variants.length && !matched){
-            status = 'removed';
-            message = `${item.name} colour ${wantedColor} is not available now. Contact ${shopPhonePretty()} to check support.`;
-          }else if(matched){
-            const sizes = Array.isArray(matched.sizeOptions) && matched.sizeOptions.length ? matched.sizeOptions.map(cartText) : cartText(live.Sizes || 'Standard').split(/[|,\n]+/).map(x=>x.trim()).filter(Boolean);
-            if(wantedSize.toLowerCase() !== 'standard' && sizes.length && !sizes.some(size => size.toLowerCase() === wantedSize.toLowerCase())){
-              status = 'removed';
-              message = `${item.name} size ${wantedSize} is not available in ${wantedColor}. Contact ${shopPhonePretty()} to check support.`;
-            }
-          }
-        }else{
-          const wanted = wantedSize.toLowerCase();
-          matched = variants.find(v => cartText(v.label || 'Standard').toLowerCase() === wanted) || null;
-          if(wanted !== 'standard' && variants.length && !matched){
-            status = 'removed';
-            message = `${item.name} option ${wantedSize} is not available now. Contact ${shopPhonePretty()} to check support.`;
-          }
+        matched = cartExactVariantMatch(live,item);
+        if(!matched && variants.length){
+          const wantedColorIsDefault=wantedColor.toLowerCase()==='default';
+          const wantedSizeIsDefault=wantedSize.toLowerCase()==='standard';
+          const sameColor=colorMode && !wantedColorIsDefault ? variants.filter(v=>cartText(v.color || v.unit || '').toLowerCase()===wantedColor.toLowerCase()) : [];
+          const sameSize=!wantedSizeIsDefault ? variants.filter(v=>cartText(v.size || v.label || 'Standard').toLowerCase()===wantedSize.toLowerCase()) : [];
+          status='removed';
+          if(colorMode && !wantedColorIsDefault && !sameColor.length) message=`${item.name} colour ${wantedColor} is no longer available. Please select another colour.`;
+          else if(!wantedSizeIsDefault && !sameSize.length) message=`${item.name} ${wantedSize} is no longer available. Please select another ${cartText(live.OptionTitle || 'option').toLowerCase()}.`;
+          else message=`${item.name} needs an exact ${colorMode?'colour and ':''}${cartText(live.OptionTitle || 'option').toLowerCase()} selection. Please open the product and select it again.`;
         }
         if(status === 'ok' && matched?.id && cartText(item.variantId) !== cartText(matched.id)){
           item.variantId=cartText(matched.id);
           changed=true;
+        }
+        if(status === 'ok' && variants.length && !matched){
+          status='removed';
+          message=`${item.name} selected option is no longer available. Please select it again.`;
         }
         if(status === 'ok' && matched && cartText(matched.stockStatus || matched.stock_status || 'in_stock') === 'out_of_stock'){
           status = 'out_of_stock';
@@ -641,14 +661,18 @@ function showOrderProblem(title, details, source = 'auto'){
 }
 
 function orderPayloadItems(cart = getCart()){
-  return cart.map(item => ({
-    product_id:cartText(item.id),
-    variant_id:cartText(item.variantId || ''),
-    color:cartText(item.color || 'Default'),
-    size:cartText(item.size || item.variant || 'Standard'),
-    quantity:Math.max(1,Math.floor(cartNumber(item.qty,1))),
-    offer_id:cartText(item.offerId || '')
-  }));
+  return cart.map(item => {
+    const color=cartText(item.color || 'Default');
+    const size=cartText(item.size || item.variant || 'Standard');
+    return {
+      product_id:cartText(item.id),
+      variant_id:cartText(item.variantId || ''),
+      color:color.toLowerCase()==='default'?'':color,
+      size:size.toLowerCase()==='standard'?'':size,
+      quantity:Math.max(1,Math.floor(cartNumber(item.qty,1))),
+      offer_id:cartText(item.offerId || '')
+    };
+  });
 }
 async function confirmOrderToDatabase(source = 'auto'){
   const context = cartCheckoutSource(source);
@@ -930,14 +954,14 @@ let storeRealtimeConnecting = false;
 let storeRealtimeRetryAttempt = 0;
 const seenStoreEventIds = new Map();
 const PRODUCT_DETAIL_SELECT = `
-  id,name,slug,description,mrp,price,main_image_url,status,stock_status,stock_quantity,track_inventory,sizes,colors,option_title,terms,created_at,updated_at,sort_order,
+  id,name,slug,description,mrp,price,main_image_url,status,stock_status,stock_quantity,track_inventory,barcode,barcode_enabled,sizes,colors,option_title,terms,created_at,updated_at,sort_order,
   categories(id,name,image_url),
   subcategories(id,name),
   product_images(id,image_url,storage_path,sort_order),
   product_variants(id,label,color,size,mrp,price,image_url,image_urls,terms,unit,stock,stock_status,sort_order)
 `;
 const PRODUCT_LIST_SELECT = `
-  id,name,mrp,price,main_image_url,status,stock_status,stock_quantity,track_inventory,updated_at,
+  id,name,mrp,price,main_image_url,status,stock_status,stock_quantity,track_inventory,barcode,barcode_enabled,updated_at,
   categories(id,name),
   subcategories(id,name),
   product_variants(id,label,color,size,mrp,price,unit,stock,stock_status,sort_order)
@@ -960,7 +984,7 @@ function sameName(a,b){ return cleanText(a).toLowerCase() === cleanText(b).toLow
 function normalizePrice(value){ return cleanText(value).replace(/^₹\s*/,'').replace(/,/g,''); }
 function money(value){ const n = Number(normalizePrice(value)); return Number.isFinite(n) && n > 0 ? n : 0; }
 function formatPrice(value){ const n = money(value); return n ? `₹${n}` : ''; }
-function cacheKey(name){ return 'wellone_supabase_v88_' + name; }
+function cacheKey(name){ return 'wellone_supabase_v96_' + name; }
 function clearLegacyStoreCaches(){
   try{
     const oldPrefixes=['wellone_supabase_v86_','wellone_supabase_v85_','wellone_supabase_v84_','wellone_supabase_v83_','wellone_supabase_v82_','wellone_supabase_v81_'];
@@ -975,7 +999,7 @@ function readAnyCache(name){ try{ const raw = localStorage.getItem(cacheKey(name
 function readFastCache(name){ try{ const raw = localStorage.getItem(cacheKey(name)); if(!raw) return null; const pack = JSON.parse(raw); if(!pack || !pack.time || now() - pack.time > FAST_CACHE_MS) return null; return pack.data || null; }catch(e){ return null; } }
 function pruneWelloneCache(maxEntries = 42){
   try{
-    const prefix = 'wellone_supabase_v88_';
+    const prefix = 'wellone_supabase_v96_';
     const entries = [];
     for(let i=0;i<localStorage.length;i++){
       const key = localStorage.key(i);
@@ -996,7 +1020,7 @@ function writeFastCache(name, data){
 }
 function clearLegacyWelloneCaches(){
   try{
-    const currentPrefix = 'wellone_supabase_v88_';
+    const currentPrefix = 'wellone_supabase_v96_';
     const removals = [];
     for(let i=0;i<localStorage.length;i++){
       const key = localStorage.key(i) || '';
@@ -1125,11 +1149,14 @@ function normalizeProduct(row){
     Status: cleanText(row.status || 'active'),
     StockStatus: cleanText(row.stock_status || 'in_stock'),
     TrackInventory: row.track_inventory === true,
-    StockQuantity: Math.max(0, Number(row.stock_quantity || 0) || 0)
+    StockQuantity: Math.max(0, Number(row.stock_quantity || 0) || 0),
+    Barcode: cleanText(row.barcode || ''),
+    BarcodeEnabled: row.barcode_enabled === true
   };
   const mainSizeOptions = splitOptions(product.Sizes || '').filter(Boolean);
   const fallbackSizes = mainSizeOptions.length ? mainSizeOptions : ['Standard'];
   const dbVariants = (row.product_variants || [])
+    .filter(v => cleanText(v.stock_status || 'in_stock') !== 'hidden')
     .slice()
     .sort((a,b)=>Number(a.sort_order||0)-Number(b.sort_order||0))
     .map(v => {
@@ -1211,7 +1238,9 @@ function normalizeProduct(row){
         if(!child.hasOwnImages) child.images = group.images;
       });
       group.stock = stockRows.reduce((sum, child) => sum + Math.max(0, Number(child.stock || 0) || 0), 0);
-      group.stockStatus = !product.TrackInventory || stockRows.some(child => cleanText(child.stockStatus || 'in_stock') !== 'out_of_stock' && Number(child.stock || 0) > 0) ? 'in_stock' : 'out_of_stock';
+      group.stockStatus = !product.TrackInventory
+        ? (stockRows.some(child => cleanText(child.stockStatus || 'in_stock') !== 'out_of_stock') ? 'in_stock' : 'out_of_stock')
+        : (stockRows.some(child => cleanText(child.stockStatus || 'in_stock') !== 'out_of_stock' && Number(child.stock || 0) > 0) ? 'in_stock' : 'out_of_stock');
     });
     product.VariantMode = 'color';
     product.Variants = groups;
@@ -1272,7 +1301,7 @@ function findProductInCachedPages(categoryName, productId){
 
 function removeStoreCacheEntries(predicate){
   try{
-    const prefix = 'wellone_supabase_v88_';
+    const prefix = 'wellone_supabase_v96_';
     const removals = [];
     for(let i=0;i<localStorage.length;i++){
       const key = localStorage.key(i) || '';
@@ -1605,12 +1634,16 @@ async function searchMatchIds(q, categoryId){
     .select('product_id,label,unit')
     .or(variantOr)
     .limit(60);
-  const [catRes, subRes, variantRes] = await Promise.all([
+  let barcodeQuery = supabaseClient().from('products').select('id,barcode').eq('status','active').eq('barcode_enabled',true);
+  if(categoryId) barcodeQuery = barcodeQuery.eq('category_id', categoryId);
+  barcodeQuery = barcodeQuery.ilike('barcode', `%${safeLike(rawQuery)}%`).limit(40);
+  const [catRes, subRes, variantRes, barcodeRes] = await Promise.all([
     supabaseClient().from('categories').select('id,name').eq('is_active', true),
     categoryId
       ? supabaseClient().from('subcategories').select('id,name,category_id').eq('is_active', true).eq('category_id', categoryId)
       : supabaseClient().from('subcategories').select('id,name,category_id').eq('is_active', true),
-    variantQuery
+    variantQuery,
+    barcodeQuery
   ]);
   const matchesAny = value => {
     const text = cleanText(value).toLowerCase();
@@ -1618,7 +1651,7 @@ async function searchMatchIds(q, categoryId){
   };
   const categoryIds = uniqueClean((catRes.data || []).filter(c => matchesAny(c.name)).map(c => c.id));
   const subcategoryIds = uniqueClean((subRes.data || []).filter(s => matchesAny(s.name)).map(s => s.id));
-  const productIds = uniqueClean((variantRes.data || []).map(v => v.product_id)).slice(0, 80);
+  const productIds = uniqueClean([...(variantRes.data || []).map(v => v.product_id), ...(barcodeRes.data || []).map(v => v.id)]).slice(0, 100);
   return {categoryIds, subcategoryIds, productIds};
 }
 function searchOrParts(q, ids = {}){
@@ -3259,45 +3292,95 @@ function productGalleryTouchEnd(event){
   activeImageIndex = (activeImageIndex + (dx < 0 ? 1 : -1) + images.length) % images.length;
   renderProductDetail();
 }
+function productGallerySectionHtml(product, inventoryVariant){
+  const images = productGalleryImages(product, inventoryVariant);
+  if(activeImageIndex >= images.length) activeImageIndex = 0;
+  const activeImage = optimizeImageUrl(images[activeImageIndex] || product.Image || fallbackImageSync(product.Category), 1000);
+  return `<div class="detail-main-img shimmer product-image-zoom-trigger" ontouchstart="productGalleryTouchStart(event)" ontouchend="productGalleryTouchEnd(event)" onclick="if(!productGalleryDidSwipe) openProductImageZoom()" role="button" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openProductImageZoom()}" aria-label="Open ${escapeHtml(product.Name)} image viewer"><img src="${activeImage}" onload="this.parentElement.classList.remove('shimmer')" onerror="this.src='${fallbackImageSync(product.Category)}'" alt="${escapeHtml(product.Name)}" draggable="false"><span class="product-image-zoom-hint" aria-hidden="true">⌕</span></div>
+    ${images.length > 1 ? `<div class="gallery-dots" aria-label="Image position">${images.map((_,i)=>`<button class="gallery-dot ${i===activeImageIndex?'active':''}" type="button" onclick="selectProductImage(${i})" aria-label="Show image ${i+1}"></button>`).join('')}</div><div class="thumb-row detail-thumb-strip" aria-label="Product images">${images.map((img,i)=>`<button class="thumb ${i===activeImageIndex?'active':''}" type="button" onclick="selectProductImage(${i})" aria-label="Show image ${i+1}"><img src="${optimizeImageUrl(img, 220)}" alt="${escapeHtml(product.Name)} thumbnail ${i+1}"></button>`).join('')}</div>` : ''}`;
+}
+function productColorBlockHtml(product){
+  if(!isColorVariantMode(product)) return '';
+  return `<div class="option-block" id="productColorBlock"><b>Choose colour</b><div class="color-variant-options">${product.Variants.map((v,i)=>{ const available = variantIsAvailable(v, product); const stockLabel = variantAvailabilityLabel(product, v); return `<button class="color-variant-choice ${i===activeVariantIndex?'active':''} ${available?'':'is-out-stock'}" type="button" onclick="selectColorVariant(${i})" aria-pressed="${i===activeVariantIndex?'true':'false'}" ${available?'':`disabled title="This colour is out of stock"`}><span>${escapeHtml(v.color || v.label || 'Colour')}</span>${stockLabel?`<small class="variant-stock-label ${available?'is-available':''}">${escapeHtml(stockLabel)}</small>`:''}</button>`; }).join('')}</div></div>`;
+}
+function productOptionBlockHtml(product){
+  const colorMode=isColorVariantMode(product);
+  const variant=selectedProductVariant(product);
+  const optionTitle=productOptionTitle(product);
+  if(colorMode){
+    const sizeOptions=selectedSizeOptions(product,variant);
+    if(!hasVisibleSizes(product,variant)) return '<div id="productOptionBlock"></div>';
+    return `<div class="option-block" id="productOptionBlock"><b>Choose ${escapeHtml(optionTitle)}</b><div class="size-variant-options">${sizeOptions.map((size,i)=>{ const child=sizeVariantForIndex(variant,i); const available=variantIsAvailable(child,product); const stockLabel=variantAvailabilityLabel(product,child); return `<button class="size-variant-choice ${i===activeSizeIndex?'active':''} ${available?'':'is-out-stock'}" type="button" onclick="selectSizeOption(${i})" ${available?'':`disabled title="This ${escapeHtml(optionTitle.toLowerCase())} is out of stock"`}><span>${escapeHtml(size)}</span>${stockLabel?`<small class="variant-stock-label ${available?'is-available':''}">${escapeHtml(stockLabel)}</small>`:''}</button>`; }).join('')}</div></div>`;
+  }
+  if(!hasSelectableOptions(product)) return '<div id="productOptionBlock"></div>';
+  return `<div class="option-block" id="productOptionBlock"><b>Choose ${escapeHtml(optionTitle)}</b><div class="size-variant-options option-variant-options">${product.Variants.map((v,i)=>{ const available = variantIsAvailable(v, product); const stockLabel = variantAvailabilityLabel(product, v); return `<button class="size-variant-choice ${i===activeVariantIndex?'active':''} ${available?'':'is-out-stock'}" type="button" onclick="selectVariant(${i})" ${available?'':`title="View and share this out-of-stock option"`}><span>${escapeHtml(v.label || 'Standard')}</span>${stockLabel?`<small class="variant-stock-label ${available?'is-available':''}">${escapeHtml(stockLabel)}</small>`:''}</button>`; }).join('')}</div></div>`;
+}
+function standaloneColorBlockHtml(product){
+  if(isColorVariantMode(product)) return '';
+  const colorsRaw=splitOptions(product.Colors || '');
+  const colors=(colorsRaw.length===1 && colorsRaw[0].toLowerCase()==='default')?[]:colorsRaw;
+  if(!colors.length) return '';
+  return `<div class="option-block" id="productStandaloneColorBlock"><b>Choose colour</b><div id="colorOptions" class="color-variant-options">${colors.map((c,i)=>`<button class="color-variant-choice ${i===activeColorIndex?'active':''}" type="button" onclick="activateColorChoice(this,${i})" aria-pressed="${i===activeColorIndex?'true':'false'}"><span>${escapeHtml(c)}</span></button>`).join('')}</div></div>`;
+}
+function updateProductDynamicSections(opts={}){
+  const product=activeProduct;
+  if(!product) return;
+  const variant=selectedProductVariant(product);
+  const sizeOptions=selectedSizeOptions(product,variant);
+  if(activeSizeIndex>=sizeOptions.length) activeSizeIndex=0;
+  const inventoryVariant=selectedInventoryVariant(product,variant);
+  if(opts.resetQty){ const qty=document.getElementById('qty'); if(qty) qty.textContent='1'; }
+  const gallery=document.getElementById('productGalleryDynamic');
+  if(gallery) gallery.innerHTML=productGallerySectionHtml(product,inventoryVariant);
+  const priceArea=document.getElementById('productPriceDynamic');
+  if(priceArea) priceArea.innerHTML=productOfferPriceHtml(product,inventoryVariant);
+  const colorArea=document.getElementById('productColorDynamic');
+  if(colorArea) colorArea.innerHTML=productColorBlockHtml(product);
+  const optionArea=document.getElementById('productOptionDynamic');
+  if(optionArea) optionArea.innerHTML=productOptionBlockHtml(product);
+  const standaloneArea=document.getElementById('productStandaloneColorDynamic');
+  if(standaloneArea) standaloneArea.innerHTML=standaloneColorBlockHtml(product);
+  const stockArea=document.getElementById('productStockDynamic');
+  if(stockArea) stockArea.innerHTML=productStockNote(product,inventoryVariant);
+  const addButton=document.getElementById('productAddButton');
+  if(addButton){
+    const available=productIsAvailable(product,inventoryVariant);
+    addButton.disabled=!available;
+    addButton.textContent=available?'Add to Cart':'Out of stock';
+    addButton.onclick=available?handleAddToCart:null;
+  }
+  const images=productGalleryImages(product,inventoryVariant);
+  syncProductSelectionUrl(product);
+  updateProductSeo(product,inventoryVariant,images);
+}
 function renderProductDetail(){
   const holder = document.getElementById('productDetail');
   const product = activeProduct;
   if(!holder || !product) return;
   const variant = selectedProductVariant(product);
-  const colorMode = isColorVariantMode(product);
   const sizeOptions = selectedSizeOptions(product, variant);
-  const inventoryVariant = selectedInventoryVariant(product, variant);
   if(activeSizeIndex >= sizeOptions.length) activeSizeIndex = 0;
-  const images = productGalleryImages(product, inventoryVariant);
-  if(activeImageIndex >= images.length) activeImageIndex = 0;
-  const activeImage = optimizeImageUrl(images[activeImageIndex] || product.Image || fallbackImageSync(product.Category), 1000);
-  const colorsRaw = splitOptions(product.Colors || '');
-  const colors = (colorsRaw.length === 1 && colorsRaw[0].toLowerCase() === 'default') ? [] : colorsRaw;
+  const inventoryVariant = selectedInventoryVariant(product, variant);
   const terms = selectedPolicyTerms(product.Terms);
-  const hasVariants = !colorMode && hasSelectableOptions(product);
-  const optionTitle = productOptionTitle(product);
-  holder.innerHTML = `<div class="detail-gallery compact-product-gallery">
-      <div class="detail-main-img shimmer product-image-zoom-trigger" ontouchstart="productGalleryTouchStart(event)" ontouchend="productGalleryTouchEnd(event)" onclick="if(!productGalleryDidSwipe) openProductImageZoom()" role="button" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openProductImageZoom()}" aria-label="Open ${escapeHtml(product.Name)} image viewer"><img src="${activeImage}" onload="this.parentElement.classList.remove('shimmer')" onerror="this.src='${fallbackImageSync(product.Category)}'" alt="${escapeHtml(product.Name)}" draggable="false"><span class="product-image-zoom-hint" aria-hidden="true">⌕</span></div>
-      ${images.length > 1 ? `<div class="gallery-dots" aria-label="Image position">${images.map((_,i)=>`<button class="gallery-dot ${i===activeImageIndex?'active':''}" type="button" onclick="selectProductImage(${i})" aria-label="Show image ${i+1}"></button>`).join('')}</div><div class="thumb-row detail-thumb-strip" aria-label="Product images">${images.map((img,i)=>`<button class="thumb ${i===activeImageIndex?'active':''}" type="button" onclick="selectProductImage(${i})" aria-label="Show image ${i+1}"><img src="${optimizeImageUrl(img, 220)}" alt="${escapeHtml(product.Name)} thumbnail ${i+1}"></button>`).join('')}</div>` : ''}
-    </div>
+  holder.innerHTML = `<div class="detail-gallery compact-product-gallery" id="productGalleryDynamic">${productGallerySectionHtml(product, inventoryVariant)}</div>
     <div class="detail-info old-product-panel compact-product-copy">
       <p class="tag product-path">${escapeHtml(product.Category)}${product.Subcategory ? ' • ' + escapeHtml(product.Subcategory) : ''}</p>
       <h1>${escapeHtml(product.Name)}</h1>
       ${product.Description ? `<p class="muted detail-description">${escapeHtml(product.Description)}</p>` : ''}
       ${productOfferNoticeHtml()}
-      ${productOfferPriceHtml(product, inventoryVariant)}
+      <div id="productPriceDynamic">${productOfferPriceHtml(product, inventoryVariant)}</div>
       <div class="detail-option-card">
-        ${colorMode ? `<div class="option-block"><b>Choose colour</b><div class="color-variant-options">${product.Variants.map((v,i)=>{ const available = variantIsAvailable(v, product); const stockLabel = variantAvailabilityLabel(product, v); return `<button class="color-variant-choice ${i===activeVariantIndex?'active':''} ${available?'':'is-out-stock'}" type="button" onclick="selectColorVariant(${i})" aria-pressed="${i===activeVariantIndex?'true':'false'}" ${available?'':`disabled title="This colour is out of stock"`}><span>${escapeHtml(v.color || v.label || 'Colour')}</span>${stockLabel?`<small class="variant-stock-label ${available?'is-available':''}">${escapeHtml(stockLabel)}</small>`:''}</button>`; }).join('')}</div></div>` : ''}
-        ${hasVariants ? `<div class="option-block"><b>Choose ${escapeHtml(optionTitle)}</b><div class="size-variant-options option-variant-options">${product.Variants.map((v,i)=>{ const available = variantIsAvailable(v, product); const stockLabel = variantAvailabilityLabel(product, v); return `<button class="size-variant-choice ${i===activeVariantIndex?'active':''} ${available?'':'is-out-stock'}" type="button" onclick="selectVariant(${i})" ${available?'':`title="View and share this out-of-stock option"`}><span>${escapeHtml(v.label || 'Standard')}</span>${stockLabel?`<small class="variant-stock-label ${available?'is-available':''}">${escapeHtml(stockLabel)}</small>`:''}</button>`; }).join('')}</div></div>` : ''}
-        ${colorMode && hasVisibleSizes(product, variant) ? `<div class="option-block"><b>Choose ${escapeHtml(optionTitle)}</b><div class="size-variant-options">${sizeOptions.map((size,i)=>{ const child=sizeVariantForIndex(variant,i); const available=variantIsAvailable(child,product); const stockLabel=variantAvailabilityLabel(product,child); return `<button class="size-variant-choice ${i===activeSizeIndex?'active':''} ${available?'':'is-out-stock'}" type="button" onclick="selectSizeOption(${i})" ${available?'':`disabled title="This ${escapeHtml(optionTitle.toLowerCase())} is out of stock"`}><span>${escapeHtml(size)}</span>${stockLabel?`<small class="variant-stock-label ${available?'is-available':''}">${escapeHtml(stockLabel)}</small>`:''}</button>`; }).join('')}</div></div>` : ''}
-        ${!colorMode && colors.length ? `<div class="option-block"><b>Choose colour</b><div id="colorOptions" class="color-variant-options">${colors.map((c,i)=>`<button class="color-variant-choice ${i===activeColorIndex?'active':''}" type="button" onclick="activateColorChoice(this,${i})" aria-pressed="${i===activeColorIndex?'true':'false'}"><span>${escapeHtml(c)}</span></button>`).join('')}</div></div>` : ''}
+        <div id="productColorDynamic">${productColorBlockHtml(product)}</div>
+        <div id="productOptionDynamic">${productOptionBlockHtml(product)}</div>
+        <div id="productStandaloneColorDynamic">${standaloneColorBlockHtml(product)}</div>
         <div class="option-block"><b>Quantity</b><div class="qty"><button type="button" onclick="changeQty(-1)">−</button><span id="qty">1</span><button type="button" onclick="changeQty(1)">+</button></div></div>
       </div>
       ${terms.length ? `<section class="product-policy-section" aria-label="Product policies"><p class="product-policy-title">Product policies</p><div class="terms-grid compact-terms stylish-terms">${terms.map(term => `<article><span class="term-icon">${policyIconSvg(term.key)}</span><span class="term-copy"><b>${escapeHtml(term.label)}</b><small>${escapeHtml(term.description)}</small></span></article>`).join('')}</div></section>` : ''}
-      ${productStockNote(product, inventoryVariant)}
-      <button class="btn primary full add-cart-button" ${productIsAvailable(product, inventoryVariant) ? 'onclick="handleAddToCart()"' : 'disabled'}>${productIsAvailable(product, inventoryVariant) ? 'Add to Cart' : 'Out of stock'}</button>
+      <div id="productStockDynamic">${productStockNote(product, inventoryVariant)}</div>
+      <button id="productAddButton" class="btn primary full add-cart-button" ${productIsAvailable(product, inventoryVariant) ? 'onclick="handleAddToCart()"' : 'disabled'}>${productIsAvailable(product, inventoryVariant) ? 'Add to Cart' : 'Out of stock'}</button>
       <div class="detail-mini-actions"><button class="share-product-btn" type="button" onclick="shareProductLink()">Share selected option</button></div>
     </div>`;
+  const images=productGalleryImages(product, inventoryVariant);
   syncProductSelectionUrl(product);
   updateProductSeo(product, inventoryVariant, images);
 }
@@ -3453,14 +3536,14 @@ function openVariantSheet(){
   document.body.insertAdjacentHTML('beforeend', `<div id="choiceModal" class="choice-modal" onclick="if(event.target===this) closeChoiceModal()"><div class="choice-card option-sheet"><div class="choice-head"><b>Select ${escapeHtml(optionTitle)}</b><button type="button" onclick="closeChoiceModal()"><span>×</span></button></div><div class="variant-choice-grid">${html}</div></div></div>`);
 }
 function selectVariantFromSheet(index){ selectVariant(index); closeChoiceModal(); }
-function selectProductImage(index){ activeImageIndex = index; renderProductDetail(); }
+function selectProductImage(index){ activeImageIndex = index; updateProductDynamicSections(); }
 function selectVariant(index){
   const variant = activeProduct?.Variants?.[index];
   if(!variant) return;
   activeVariantIndex = index;
   activeSizeIndex = 0;
   activeImageIndex = 0;
-  renderProductDetail();
+  updateProductDynamicSections({resetQty:true});
   if(!variantIsAvailable(variant)) showSoftToast('Out of stock — link can still be shared');
 }
 function selectColorVariant(index){
@@ -3471,10 +3554,10 @@ function selectColorVariant(index){
   const firstAvailableSize = exactSizes.findIndex(item => variantIsAvailable(item, activeProduct));
   activeSizeIndex = firstAvailableSize >= 0 ? firstAvailableSize : 0;
   activeImageIndex = 0;
-  renderProductDetail();
+  updateProductDynamicSections({resetQty:true});
   if(!variantIsAvailable(variant)) showSoftToast('Out of stock — link can still be shared');
 }
-function selectSizeOption(index){ activeSizeIndex = index; renderProductDetail(); if(!variantIsAvailable(selectedInventoryVariant(activeProduct, selectedProductVariant(activeProduct)), activeProduct)) showSoftToast('This size is out of stock'); }
+function selectSizeOption(index){ activeSizeIndex = index; activeImageIndex=0; updateProductDynamicSections({resetQty:true}); if(!variantIsAvailable(selectedInventoryVariant(activeProduct, selectedProductVariant(activeProduct)), activeProduct)) showSoftToast('This size is out of stock'); }
 function activateChip(button){
   button.parentElement.querySelectorAll('.chip').forEach(chip => chip.classList.remove('active'));
   button.classList.add('active');

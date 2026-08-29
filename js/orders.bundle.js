@@ -412,7 +412,7 @@ async function getLiveCartProduct(item){
     const {data, error} = await client.from('products').select('id,name,mrp,price,status,stock_status,stock_quantity,track_inventory,main_image_url,sizes,colors,option_title,product_variants(id,label,unit,color,size,mrp,price,image_url,image_urls,stock,stock_status,sort_order)').eq('id', item.id).maybeSingle();
     if(error) throw error;
     if(!data) return null;
-    return {ID:data.id, Name:data.name, MRP:data.mrp, Price:data.price, Status:data.status, StockStatus:data.stock_status, TrackInventory:data.track_inventory === true, StockQuantity:Math.max(0, cartNumber(data.stock_quantity, 0)), Image:data.main_image_url, Sizes:data.sizes, Colors:data.colors, VariantMode:(data.product_variants||[]).some(v=>cartText(v.color || v.unit))?'color':'option', Variants:(data.product_variants||[]).map(v=>({id:cartText(v.id), label:cartText(v.size || v.label || 'Standard'), color:cartText(v.color || v.unit || ''), size:cartText(v.size || v.label || 'Standard'), sizeOptions:cartText(v.size || v.label).split(/[|,\n]+/).map(x=>x.trim()).filter(Boolean), price:v.price || data.price, mrp:v.mrp || data.mrp, images:(v.image_urls&&v.image_urls.length?v.image_urls:[v.image_url].filter(Boolean)), stock:Math.max(0, cartNumber(v.stock, 0)), stockStatus:cartText(v.stock_status || 'in_stock'), inventorySource:'variant'}))};
+    return {ID:data.id, Name:data.name, MRP:data.mrp, Price:data.price, Status:data.status, StockStatus:data.stock_status, TrackInventory:data.track_inventory === true, StockQuantity:Math.max(0, cartNumber(data.stock_quantity, 0)), Image:data.main_image_url, Sizes:data.sizes, Colors:data.colors, VariantMode:(data.product_variants||[]).some(v=>cartText(v.color || v.unit))?'color':'option', Variants:(data.product_variants||[]).filter(v=>cartText(v.stock_status || 'in_stock')!=='hidden').map(v=>({id:cartText(v.id), label:cartText(v.size || v.label || 'Standard'), color:cartText(v.color || v.unit || ''), size:cartText(v.size || v.label || 'Standard'), sizeOptions:cartText(v.size || v.label).split(/[|,\n]+/).map(x=>x.trim()).filter(Boolean), price:v.price || data.price, mrp:v.mrp || data.mrp, images:(v.image_urls&&v.image_urls.length?v.image_urls:[v.image_url].filter(Boolean)), stock:Math.max(0, cartNumber(v.stock, 0)), stockStatus:cartText(v.stock_status || 'in_stock'), inventorySource:'variant'}))};
   }
   return null;
 }
@@ -455,6 +455,35 @@ function cartInventoryVariants(live){
   });
   return exact;
 }
+function cartIsDefaultValue(value, fallback){
+  const v=cartText(value || fallback).toLowerCase();
+  return !v || v===String(fallback||'').toLowerCase();
+}
+function cartExactVariantMatch(live,item){
+  const variants=cartInventoryVariants(live);
+  if(!variants.length) return null;
+  const wantedId=cartText(item?.variantId || item?.variant_id);
+  const wantedColor=cartText(item?.color || 'Default');
+  const wantedSize=cartText(item?.size || item?.variant || 'Standard');
+  const colorRelevant=!cartIsDefaultValue(wantedColor,'Default');
+  const sizeRelevant=!cartIsDefaultValue(wantedSize,'Standard');
+  if(wantedId){
+    const byId=variants.find(v=>cartText(v.id)===wantedId);
+    if(byId){
+      const colorOk=!colorRelevant || cartText(byId.color || byId.unit || '').toLowerCase()===wantedColor.toLowerCase();
+      const sizeOk=!sizeRelevant || cartText(byId.size || byId.label || 'Standard').toLowerCase()===wantedSize.toLowerCase();
+      if(colorOk && sizeOk) return byId;
+    }
+  }
+  const candidates=variants.filter(v=>{
+    const vc=cartText(v.color || v.unit || '').toLowerCase();
+    const vs=cartText(v.size || v.label || 'Standard').toLowerCase();
+    return (!colorRelevant || vc===wantedColor.toLowerCase()) && (!sizeRelevant || vs===wantedSize.toLowerCase());
+  });
+  if(colorRelevant && sizeRelevant) return candidates[0] || null;
+  // If a dimension is missing, only auto-resolve when there is exactly one possible exact record.
+  return candidates.length===1 ? candidates[0] : null;
+}
 
 async function checkCartAvailabilityAndRefresh(){
   const cart = getCart();
@@ -483,33 +512,24 @@ async function checkCartAvailabilityAndRefresh(){
         const colorMode = live.VariantMode === 'color' || variants.some(v => cartText(v.color));
         const wantedSize = cartText(item.size || item.variant || 'Standard');
         const wantedColor = cartText(item.color || 'Default');
-        if(item.variantId) matched = variants.find(v => cartText(v.id) === cartText(item.variantId)) || null;
-        if(matched){
-          // Exact true colour + size combination selected from the product page.
-        }else if(colorMode){
-          matched = variants.find(v => cartText(v.color || v.label).toLowerCase() === wantedColor.toLowerCase() && (wantedSize.toLowerCase()==='standard' || cartText(v.size || v.label || 'Standard').toLowerCase()===wantedSize.toLowerCase()))
-            || variants.find(v => cartText(v.color || v.label).toLowerCase() === wantedColor.toLowerCase()) || null;
-          if(wantedColor.toLowerCase() !== 'default' && variants.length && !matched){
-            status = 'removed';
-            message = `${item.name} colour ${wantedColor} is not available now. Contact ${shopPhonePretty()} to check support.`;
-          }else if(matched){
-            const sizes = Array.isArray(matched.sizeOptions) && matched.sizeOptions.length ? matched.sizeOptions.map(cartText) : cartText(live.Sizes || 'Standard').split(/[|,\n]+/).map(x=>x.trim()).filter(Boolean);
-            if(wantedSize.toLowerCase() !== 'standard' && sizes.length && !sizes.some(size => size.toLowerCase() === wantedSize.toLowerCase())){
-              status = 'removed';
-              message = `${item.name} size ${wantedSize} is not available in ${wantedColor}. Contact ${shopPhonePretty()} to check support.`;
-            }
-          }
-        }else{
-          const wanted = wantedSize.toLowerCase();
-          matched = variants.find(v => cartText(v.label || 'Standard').toLowerCase() === wanted) || null;
-          if(wanted !== 'standard' && variants.length && !matched){
-            status = 'removed';
-            message = `${item.name} option ${wantedSize} is not available now. Contact ${shopPhonePretty()} to check support.`;
-          }
+        matched = cartExactVariantMatch(live,item);
+        if(!matched && variants.length){
+          const wantedColorIsDefault=wantedColor.toLowerCase()==='default';
+          const wantedSizeIsDefault=wantedSize.toLowerCase()==='standard';
+          const sameColor=colorMode && !wantedColorIsDefault ? variants.filter(v=>cartText(v.color || v.unit || '').toLowerCase()===wantedColor.toLowerCase()) : [];
+          const sameSize=!wantedSizeIsDefault ? variants.filter(v=>cartText(v.size || v.label || 'Standard').toLowerCase()===wantedSize.toLowerCase()) : [];
+          status='removed';
+          if(colorMode && !wantedColorIsDefault && !sameColor.length) message=`${item.name} colour ${wantedColor} is no longer available. Please select another colour.`;
+          else if(!wantedSizeIsDefault && !sameSize.length) message=`${item.name} ${wantedSize} is no longer available. Please select another ${cartText(live.OptionTitle || 'option').toLowerCase()}.`;
+          else message=`${item.name} needs an exact ${colorMode?'colour and ':''}${cartText(live.OptionTitle || 'option').toLowerCase()} selection. Please open the product and select it again.`;
         }
         if(status === 'ok' && matched?.id && cartText(item.variantId) !== cartText(matched.id)){
           item.variantId=cartText(matched.id);
           changed=true;
+        }
+        if(status === 'ok' && variants.length && !matched){
+          status='removed';
+          message=`${item.name} selected option is no longer available. Please select it again.`;
         }
         if(status === 'ok' && matched && cartText(matched.stockStatus || matched.stock_status || 'in_stock') === 'out_of_stock'){
           status = 'out_of_stock';
@@ -641,14 +661,18 @@ function showOrderProblem(title, details, source = 'auto'){
 }
 
 function orderPayloadItems(cart = getCart()){
-  return cart.map(item => ({
-    product_id:cartText(item.id),
-    variant_id:cartText(item.variantId || ''),
-    color:cartText(item.color || 'Default'),
-    size:cartText(item.size || item.variant || 'Standard'),
-    quantity:Math.max(1,Math.floor(cartNumber(item.qty,1))),
-    offer_id:cartText(item.offerId || '')
-  }));
+  return cart.map(item => {
+    const color=cartText(item.color || 'Default');
+    const size=cartText(item.size || item.variant || 'Standard');
+    return {
+      product_id:cartText(item.id),
+      variant_id:cartText(item.variantId || ''),
+      color:color.toLowerCase()==='default'?'':color,
+      size:size.toLowerCase()==='standard'?'':size,
+      quantity:Math.max(1,Math.floor(cartNumber(item.qty,1))),
+      offer_id:cartText(item.offerId || '')
+    };
+  });
 }
 async function confirmOrderToDatabase(source = 'auto'){
   const context = cartCheckoutSource(source);
@@ -960,13 +984,13 @@ function sameName(a,b){ return cleanText(a).toLowerCase() === cleanText(b).toLow
 function normalizePrice(value){ return cleanText(value).replace(/^₹\s*/,'').replace(/,/g,''); }
 function money(value){ const n = Number(normalizePrice(value)); return Number.isFinite(n) && n > 0 ? n : 0; }
 function formatPrice(value){ const n = money(value); return n ? `₹${n}` : ''; }
-function cacheKey(name){ return 'wellone_supabase_v88_' + name; }
+function cacheKey(name){ return 'wellone_supabase_v96_' + name; }
 function now(){ return Date.now(); }
 function readAnyCache(name){ try{ const raw = localStorage.getItem(cacheKey(name)); if(!raw) return null; const pack = JSON.parse(raw); return pack && pack.data ? pack.data : null; }catch(e){ return null; } }
 function readFastCache(name){ try{ const raw = localStorage.getItem(cacheKey(name)); if(!raw) return null; const pack = JSON.parse(raw); if(!pack || !pack.time || now() - pack.time > FAST_CACHE_MS) return null; return pack.data || null; }catch(e){ return null; } }
 function pruneWelloneCache(maxEntries = 42){
   try{
-    const prefix = 'wellone_supabase_v88_';
+    const prefix = 'wellone_supabase_v96_';
     const entries = [];
     for(let i=0;i<localStorage.length;i++){
       const key = localStorage.key(i);
@@ -987,7 +1011,7 @@ function writeFastCache(name, data){
 }
 function clearLegacyWelloneCaches(){
   try{
-    const currentPrefix = 'wellone_supabase_v88_';
+    const currentPrefix = 'wellone_supabase_v96_';
     const removals = [];
     for(let i=0;i<localStorage.length;i++){
       const key = localStorage.key(i) || '';
@@ -1263,7 +1287,7 @@ function findProductInCachedPages(categoryName, productId){
 
 function removeStoreCacheEntries(predicate){
   try{
-    const prefix = 'wellone_supabase_v88_';
+    const prefix = 'wellone_supabase_v96_';
     const removals = [];
     for(let i=0;i<localStorage.length;i++){
       const key = localStorage.key(i) || '';
