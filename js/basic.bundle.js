@@ -11,12 +11,12 @@ const SITE_CONFIG = {
 /* bundled from cart.js */
 'use strict';
 
-const CART_KEY = 'wellone_cart_final_v28';
+const CART_KEY = 'wellone_cart_final_v29';
 const ORDER_CART_CLEAR_KEY = 'wellone_order_cart_clear_pending';
 const ORDER_REFS_KEY = 'wellone_customer_order_refs_v1';
 window.WELLONE_ORDER_REFS_KEY = ORDER_REFS_KEY;
 const LEGACY_CART_KEYS = [
-  'wellone_cart_final_v27','wellone_cart_final_v25','wellone_cart_final_v24','wellone_cart_final_v23','wellone_cart_final_v22','wellone_cart_final_v21','wellone_cart_final_v20','wellone_cart_final_v19','wellone_cart_final_v18','wellone_cart_final_v17','wellone_cart_final_v16','wellone_cart_final_v7','wellone_cart_final_v1','wellone_kids_saved_cart_v3',
+  'wellone_cart_final_v28','wellone_cart_final_v27','wellone_cart_final_v25','wellone_cart_final_v24','wellone_cart_final_v23','wellone_cart_final_v22','wellone_cart_final_v21','wellone_cart_final_v20','wellone_cart_final_v19','wellone_cart_final_v18','wellone_cart_final_v17','wellone_cart_final_v16','wellone_cart_final_v7','wellone_cart_final_v1','wellone_kids_saved_cart_v3',
   'wellone_kids_saved_cart_v2','wellone_kids_saved_cart','welloneCart','cart'
 ];
 
@@ -95,6 +95,7 @@ function normalizeCart(rawItems){
     const item = {
       id: cartText(raw.id || raw.ID || raw.Id || raw.productId || raw.name || raw.Name, 'item'),
       variantId: cartText(raw.variantId || raw.variant_id || ''),
+      barcode: cartText(raw.barcode || raw.Barcode || raw.productBarcode || raw.product_barcode || ''),
       name: cartText(raw.name || raw.Name, 'Product'),
       category: cartText(raw.category || raw.Category, ''),
       subcategory: cartText(raw.subcategory || raw.Subcategory, ''),
@@ -190,6 +191,7 @@ function addCartItem(product, selected = {}){
   const item = {
     id: cartText(product.ID || product.Id || product.id || product.Name || product.name, 'item'),
     variantId: cartText(selected.variantId || selected.variant_id || ''),
+    barcode: cartText(selected.barcode || product.Barcode || product.barcode || ''),
     name: cartText(product.Name || product.name, 'Product'),
     category: cartText(selected.category || product.Category || product.category, ''),
     subcategory: cartText(selected.subcategory || product.Subcategory || ''),
@@ -228,6 +230,11 @@ function addCartItem(product, selected = {}){
       existing.offerPrice = item.offerPrice;
       existing.offerStatus = item.offerStatus;
       existing.offerMessage = item.offerMessage;
+      existing.variantId = item.variantId || existing.variantId;
+      existing.barcode = item.barcode || existing.barcode;
+      existing.color = item.color || existing.color;
+      existing.size = item.size || existing.size;
+      existing.variant = item.variant || existing.variant;
       saveCart(cart);
       showSoftToast(`Only ${item.stockQuantity} left in stock`);
       return;
@@ -243,6 +250,11 @@ function addCartItem(product, selected = {}){
     existing.offerPrice = item.offerPrice;
     existing.offerStatus = item.offerStatus;
     existing.offerMessage = item.offerMessage;
+    existing.variantId = item.variantId || existing.variantId;
+    existing.barcode = item.barcode || existing.barcode;
+    existing.color = item.color || existing.color;
+    existing.size = item.size || existing.size;
+    existing.variant = item.variant || existing.variant;
   }else{
     item.key = key;
     cart.push(item);
@@ -383,10 +395,23 @@ function cartNoticeTarget(source = 'auto'){
   return document.getElementById('cartDrawerItems') || document.getElementById('cartItems');
 }
 function clearCartNotices(source = 'auto'){
+  const context=cartCheckoutSource(source);
+  if(context==='drawer'){
+    const slot=document.getElementById('cartDrawerNotice');
+    if(slot){ slot.textContent=''; slot.className='cart-drawer-notice-slot'; }
+    return;
+  }
   const target = cartNoticeTarget(source);
   target?.parentElement?.querySelectorAll('.cart-notice').forEach(x => x.remove());
 }
 function showCartNotice(text, type = 'warn', source = 'auto'){
+  const context=cartCheckoutSource(source);
+  if(context==='drawer'){
+    ensureCartDrawer();
+    const slot=document.getElementById('cartDrawerNotice');
+    if(slot){ slot.textContent=text; slot.className=`cart-drawer-notice-slot cart-notice ${type}`; }
+    return;
+  }
   const target = cartNoticeTarget(source);
   clearCartNotices(source);
   const notice = document.createElement('div');
@@ -404,10 +429,10 @@ async function getLiveCartProduct(item){
   if(window.supabase && window.SITE_CONFIG){
     const client = window.__welloneSupabase || window.supabase.createClient(SITE_CONFIG.supabaseUrl, SITE_CONFIG.supabaseAnonKey);
     window.__welloneSupabase = client;
-    const {data, error} = await client.from('products').select('id,name,mrp,price,status,stock_status,stock_quantity,track_inventory,main_image_url,sizes,colors,option_title,product_variants(id,label,unit,color,size,mrp,price,image_url,image_urls,stock,stock_status,sort_order)').eq('id', item.id).maybeSingle();
+    const {data, error} = await client.from('products').select('id,name,mrp,price,barcode,status,stock_status,stock_quantity,track_inventory,main_image_url,sizes,colors,option_title,product_variants(id,label,unit,color,size,mrp,price,image_url,image_urls,stock,stock_status,sort_order)').eq('id', item.id).maybeSingle();
     if(error) throw error;
     if(!data) return null;
-    return {ID:data.id, Name:data.name, MRP:data.mrp, Price:data.price, Status:data.status, StockStatus:data.stock_status, TrackInventory:data.track_inventory === true, StockQuantity:Math.max(0, cartNumber(data.stock_quantity, 0)), Image:data.main_image_url, Sizes:data.sizes, Colors:data.colors, VariantMode:(data.product_variants||[]).some(v=>cartText(v.color || v.unit))?'color':'option', Variants:(data.product_variants||[]).filter(v=>cartText(v.stock_status || 'in_stock')!=='hidden').map(v=>({id:cartText(v.id), label:cartText(v.size || v.label || 'Standard'), color:cartText(v.color || v.unit || ''), size:cartText(v.size || v.label || 'Standard'), sizeOptions:cartText(v.size || v.label).split(/[|,\n]+/).map(x=>x.trim()).filter(Boolean), price:v.price || data.price, mrp:v.mrp || data.mrp, images:(v.image_urls&&v.image_urls.length?v.image_urls:[v.image_url].filter(Boolean)), stock:Math.max(0, cartNumber(v.stock, 0)), stockStatus:cartText(v.stock_status || 'in_stock'), inventorySource:'variant'}))};
+    return {ID:data.id, Name:data.name, MRP:data.mrp, Price:data.price, Barcode:cartText(data.barcode || ''), Status:data.status, StockStatus:data.stock_status, TrackInventory:data.track_inventory === true, StockQuantity:Math.max(0, cartNumber(data.stock_quantity, 0)), Image:data.main_image_url, Sizes:data.sizes, Colors:data.colors, VariantMode:(data.product_variants||[]).some(v=>cartText(v.color || v.unit))?'color':'option', Variants:(data.product_variants||[]).filter(v=>cartText(v.stock_status || 'in_stock')!=='hidden').map(v=>({id:cartText(v.id), label:cartText(v.size || v.label || 'Standard'), color:cartText(v.color || v.unit || ''), size:cartText(v.size || v.label || 'Standard'), sizeOptions:cartText(v.size || v.label).split(/[|,\n]+/).map(x=>x.trim()).filter(Boolean), price:v.price || data.price, mrp:v.mrp || data.mrp, images:(v.image_urls&&v.image_urls.length?v.image_urls:[v.image_url].filter(Boolean)), stock:Math.max(0, cartNumber(v.stock, 0)), stockStatus:cartText(v.stock_status || 'in_stock'), inventorySource:'variant'}))};
   }
   return null;
 }
@@ -444,9 +469,17 @@ function cartInventoryVariants(live){
   const roots=Array.isArray(live?.Variants)?live.Variants:[];
   const exact=[];
   roots.forEach(root=>{
+    const rootColor=cartText(root?.color || root?.unit || '');
     if(Array.isArray(root?.sizeVariants) && root.sizeVariants.length){
-      root.sizeVariants.forEach(child=>exact.push({...child,color:clean(child.color || root.color || root.unit || '')}));
-    }else exact.push(root);
+      root.sizeVariants.forEach(child=>exact.push({...child,color:cartText(child.color || rootColor)}));
+      return;
+    }
+    const options=Array.isArray(root?.sizeOptions) ? root.sizeOptions.map(x=>cartText(x)).filter(Boolean) : [];
+    if(options.length>1){
+      options.forEach(size=>exact.push({...root,color:rootColor,size,label:size,sizeOptions:[size]}));
+      return;
+    }
+    exact.push({...root,color:rootColor});
   });
   return exact;
 }
@@ -499,11 +532,17 @@ async function checkCartAvailabilityAndRefresh(){
       }else if(cartText(live.Status || 'active') !== 'active'){
         status = 'removed';
         message = `${item.name} is not listed now. Contact ${shopPhonePretty()} to check availability.`;
-      }else if(cartText(live.StockStatus || 'in_stock') === 'out_of_stock' || (live.TrackInventory === true && cartNumber(live.StockQuantity, 0) <= 0)){
-        status = 'out_of_stock';
-        message = `${item.name} is out of stock now. Contact ${shopPhonePretty()} for latest availability.`;
       }else{
         const variants = cartInventoryVariants(live);
+        const hasExactVariants = variants.length > 0;
+        if(!hasExactVariants && (cartText(live.StockStatus || 'in_stock') === 'out_of_stock' || (live.TrackInventory === true && cartNumber(live.StockQuantity, 0) <= 0))){
+          status = 'out_of_stock';
+          message = `${item.name} is out of stock now. Contact ${shopPhonePretty()} for latest availability.`;
+        }
+        if(status !== 'ok'){
+          // For simple products the parent stock row is authoritative. For option products,
+          // exact variant stock below is authoritative so stale parent totals cannot block checkout.
+        }else{
         const colorMode = live.VariantMode === 'color' || variants.some(v => cartText(v.color));
         const wantedSize = cartText(item.size || item.variant || 'Standard');
         const wantedColor = cartText(item.color || 'Default');
@@ -518,9 +557,15 @@ async function checkCartAvailabilityAndRefresh(){
           else if(!wantedSizeIsDefault && !sameSize.length) message=`${item.name} ${wantedSize} is no longer available. Please select another ${cartText(live.OptionTitle || 'option').toLowerCase()}.`;
           else message=`${item.name} needs an exact ${colorMode?'colour and ':''}${cartText(live.OptionTitle || 'option').toLowerCase()} selection. Please open the product and select it again.`;
         }
-        if(status === 'ok' && matched?.id && cartText(item.variantId) !== cartText(matched.id)){
-          item.variantId=cartText(matched.id);
-          changed=true;
+        if(status === 'ok' && matched){
+          const exactId=cartText(matched.id || item.variantId);
+          const exactColor=cartText(matched.color || matched.unit || wantedColor || 'Default','Default');
+          const exactSize=cartText(matched.size || matched.label || wantedSize || 'Standard','Standard');
+          if(exactId && cartText(item.variantId)!==exactId){ item.variantId=exactId; changed=true; }
+          if(exactColor && cartText(item.color || 'Default').toLowerCase()!==exactColor.toLowerCase()){ item.color=exactColor; changed=true; }
+          if(exactSize && cartText(item.size || item.variant || 'Standard').toLowerCase()!==exactSize.toLowerCase()){ item.size=exactSize; item.variant=exactSize; changed=true; }
+          const liveBarcode=cartText(live.Barcode || live.barcode || item.barcode || '');
+          if(liveBarcode && cartText(item.barcode)!==liveBarcode){ item.barcode=liveBarcode; changed=true; }
         }
         if(status === 'ok' && variants.length && !matched){
           status='removed';
@@ -549,6 +594,7 @@ async function checkCartAvailabilityAndRefresh(){
           item.trackInventory = false;
           item.stockQuantity = 0;
           changed = true;
+        }
         }
       }
 
@@ -662,8 +708,13 @@ function orderPayloadItems(cart = getCart()){
     return {
       product_id:cartText(item.id),
       variant_id:cartText(item.variantId || ''),
+      selected_variant_id:cartText(item.variantId || ''),
       color:color.toLowerCase()==='default'?'':color,
+      selected_color:color.toLowerCase()==='default'?'':color,
       size:size.toLowerCase()==='standard'?'':size,
+      selected_option:size.toLowerCase()==='standard'?'':size,
+      variant:size.toLowerCase()==='standard'?'':size,
+      product_barcode:cartText(item.barcode || ''),
       quantity:Math.max(1,Math.floor(cartNumber(item.qty,1))),
       offer_id:cartText(item.offerId || '')
     };
@@ -692,6 +743,9 @@ async function confirmOrderToDatabase(source = 'auto'){
     showSoftToast('Item unavailable');
     return;
   }
+  // Availability refresh may repair an older cart line with its exact variant id.
+  // Reload the repaired cart before calling the order RPC instead of sending the stale pre-check array.
+  const orderCart=getCart();
   try{
     const client = typeof supabaseClient === 'function' ? supabaseClient() : (window.__welloneSupabase || window.supabase.createClient(SITE_CONFIG.supabaseUrl,SITE_CONFIG.supabaseAnonKey));
     const {data,error}=await client.rpc('create_customer_order',{
@@ -699,12 +753,12 @@ async function confirmOrderToDatabase(source = 'auto'){
       p_customer_phone:customerPhone,
       p_customer_address:customerAddress,
       p_payment_method:paymentMethod,
-      p_items:orderPayloadItems(cart)
+      p_items:orderPayloadItems(orderCart)
     });
     if(error) throw error;
     if(!data?.order_id || !data?.tracking_token) throw new Error('Order confirmation did not return a tracking reference.');
     saveOrderRef(data);
-    clearSubmittedOrderCart(cart);
+    clearSubmittedOrderCart(orderCart);
     broadcastCustomerStockChange('customer-order-confirmed').catch(()=>{});
     window.location.assign(`order-confirmed.html?id=${encodeURIComponent(data.order_id)}`);
   }catch(error){
@@ -731,6 +785,7 @@ function ensureCartDrawer(){
   <aside class="cart-drawer" id="cartDrawer" aria-label="Shopping cart" aria-hidden="true">
     <div class="cart-head"><div><p class="tag">shopping cart</p><h2>Your cart</h2><p class="cart-support-top">Support: <a href="${shopPhoneHref()}">${shopPhonePretty()}</a></p></div><button class="cart-close" type="button" onclick="closeCartDrawer()" aria-label="Close cart"><span>×</span></button></div>
     <div class="cart-drawer-total"><span><b data-cart-count>0</b> item(s)</span><strong data-cart-total>₹0</strong></div>
+    <div id="cartDrawerNotice" class="cart-drawer-notice-slot" aria-live="polite"></div>
     <div id="cartDrawerItems" class="cart-items"></div>
     <div id="cartDrawerAction" class="cart-action-footer"><button class="btn primary full" type="button" onclick="proceedToCheckout('drawer')">Proceed to order</button></div>
     <form id="drawerCheckoutForm" class="checkout-form checkout-hidden" onsubmit="event.preventDefault(); confirmOrderToWhatsApp('drawer');">
