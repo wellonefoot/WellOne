@@ -1,0 +1,6 @@
+WellOne Customer v99
+
+- Every size inside the same colour now always uses that colour's shared image.
+- Supports existing products where only one size row stored the colour image.
+- Prevents fallback/main-product images from appearing on other sizes of the selected colour.
+- v98 full-screen Orders page behavior is preserved.

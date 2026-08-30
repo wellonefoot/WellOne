@@ -1274,11 +1274,15 @@ function normalizeProduct(row){
       const uniqueStockRows = new Map();
       group.sizeVariants.forEach(child => { if(child.id && !uniqueStockRows.has(child.id)) uniqueStockRows.set(child.id, child); });
       const stockRows = [...uniqueStockRows.values()];
-      const colourGallerySource = group.sizeVariants[0] && group.sizeVariants[0].hasOwnImages && Array.isArray(group.sizeVariants[0].images) && group.sizeVariants[0].images.length ? group.sizeVariants[0] : null;
+      // One colour = one image for every exact size. Use the first real image
+      // stored anywhere in this colour group (supports older products where only
+      // the first size owned the image), then force every size to use it.
+      const colourGallerySource = group.sizeVariants.find(child => child && child.hasOwnImages && Array.isArray(child.images) && child.images.length) || null;
       group.images = colourGallerySource ? colourGallerySource.images : product.Images;
       group.hasOwnImages = Boolean(colourGallerySource);
       group.sizeVariants.forEach(child => {
-        if(!child.hasOwnImages) child.images = group.images;
+        child.images = group.images;
+        child.hasOwnImages = group.hasOwnImages;
       });
       group.stock = stockRows.reduce((sum, child) => sum + Math.max(0, Number(child.stock || 0) || 0), 0);
       group.stockStatus = !product.TrackInventory || stockRows.some(child => cleanText(child.stockStatus || 'in_stock') !== 'out_of_stock' && Number(child.stock || 0) > 0) ? 'in_stock' : 'out_of_stock';
