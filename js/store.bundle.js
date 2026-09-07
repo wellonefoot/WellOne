@@ -889,7 +889,7 @@ function headerBackFallback(){
     const category = new URLSearchParams(location.search).get('cat') || '';
     return `catalog.html${category ? '?cat=' + encodeURIComponent(category) : ''}`;
   }
-  if(page === 'catalog.html' || page === 'about.html' || page === 'contact.html' || page === 'orders.html') return 'index.html';
+  if(page === 'catalog.html' || page === 'wishlist.html' || page === 'about.html' || page === 'contact.html' || page === 'orders.html') return 'index.html';
   if(page === 'cart.html') return 'catalog.html';
   return '';
 }
@@ -1016,7 +1016,7 @@ const PRODUCT_DETAIL_SELECT = `
   product_variants(id,label,color,size,mrp,price,image_url,image_urls,terms,unit,stock,stock_status,sort_order)
 `;
 const PRODUCT_LIST_SELECT = `
-  id,name,mrp,price,main_image_url,status,stock_status,stock_quantity,track_inventory,barcode,barcode_enabled,updated_at,
+  id,name,mrp,price,main_image_url,status,stock_status,stock_quantity,track_inventory,barcode,barcode_enabled,sizes,colors,option_title,updated_at,
   categories(id,name),
   subcategories(id,name),
   product_variants(id,label,color,size,mrp,price,unit,stock,stock_status,sort_order)
@@ -1039,7 +1039,7 @@ function sameName(a,b){ return cleanText(a).toLowerCase() === cleanText(b).toLow
 function normalizePrice(value){ return cleanText(value).replace(/^₹\s*/,'').replace(/,/g,''); }
 function money(value){ const n = Number(normalizePrice(value)); return Number.isFinite(n) && n > 0 ? n : 0; }
 function formatPrice(value){ const n = money(value); return n ? `₹${n}` : ''; }
-function cacheKey(name){ return 'wellone_supabase_v97_' + name; }
+function cacheKey(name){ return 'wellone_supabase_v100_' + name; }
 function clearLegacyStoreCaches(){
   try{
     const oldPrefixes=['wellone_supabase_v86_','wellone_supabase_v85_','wellone_supabase_v84_','wellone_supabase_v83_','wellone_supabase_v82_','wellone_supabase_v81_'];
@@ -1054,7 +1054,7 @@ function readAnyCache(name){ try{ const raw = localStorage.getItem(cacheKey(name
 function readFastCache(name){ try{ const raw = localStorage.getItem(cacheKey(name)); if(!raw) return null; const pack = JSON.parse(raw); if(!pack || !pack.time || now() - pack.time > FAST_CACHE_MS) return null; return pack.data || null; }catch(e){ return null; } }
 function pruneWelloneCache(maxEntries = 42){
   try{
-    const prefix = 'wellone_supabase_v97_';
+    const prefix = 'wellone_supabase_v100_';
     const entries = [];
     for(let i=0;i<localStorage.length;i++){
       const key = localStorage.key(i);
@@ -1075,7 +1075,7 @@ function writeFastCache(name, data){
 }
 function clearLegacyWelloneCaches(){
   try{
-    const currentPrefix = 'wellone_supabase_v97_';
+    const currentPrefix = 'wellone_supabase_v100_';
     const removals = [];
     for(let i=0;i<localStorage.length;i++){
       const key = localStorage.key(i) || '';
@@ -1167,6 +1167,8 @@ function normalizeOfferItems(data, productMap = new Map()){
       productId: cleanText(linkedProductId),
       productName: cleanText(product && product.name),
       image: optimizeImageUrl(cleanText(product && product.main_image_url), 620),
+      barcode: cleanText(product && product.barcode),
+      barcodeEnabled: product && product.barcode_enabled === true,
       mrp: dbPrice(product && product.mrp),
       productPrice: dbPrice(product && product.price),
       stockStatus: cleanText(product && product.stock_status || 'in_stock'),
@@ -1360,7 +1362,7 @@ function findProductInCachedPages(categoryName, productId){
 
 function removeStoreCacheEntries(predicate){
   try{
-    const prefix = 'wellone_supabase_v97_';
+    const prefix = 'wellone_supabase_v100_';
     const removals = [];
     for(let i=0;i<localStorage.length;i++){
       const key = localStorage.key(i) || '';
@@ -1376,12 +1378,14 @@ function invalidateStoreData(table = ''){
   const productTable = ['products','product_variants','product_images'].includes(name) || !name;
   if(productTable){
     productCacheByKey.clear();
+    if(typeof catalogOptionCache !== 'undefined') catalogOptionCache.clear();
     removeStoreCacheEntries(key => key.startsWith('page_') || key.startsWith('global_') || key.startsWith('catalog_view_') || key.startsWith('product_') || key === 'last_open_product');
   }
   if(name === 'categories' || !name){
     categoryCache = null;
     subcategoryCache.clear();
     subcategoryIdCache.clear();
+    if(typeof catalogOptionCache !== 'undefined') catalogOptionCache.clear();
     removeStoreCacheEntries(key => key === 'categories' || key.startsWith('subcategories_'));
   }else if(name === 'subcategories'){
     subcategoryCache.clear();
@@ -1594,7 +1598,7 @@ async function loadOfferItems(forceRefresh = false){
   if(productIds.length){
     const {data:products, error:productError} = await supabaseClient()
       .from('products')
-      .select('id,name,mrp,price,main_image_url,status,stock_status,stock_quantity,track_inventory')
+      .select('id,name,mrp,price,main_image_url,status,stock_status,stock_quantity,track_inventory,barcode,barcode_enabled')
       .in('id', productIds)
       .eq('status','active');
     if(!productError) (products || []).forEach(product => productMap.set(cleanText(product.id), product));
@@ -1661,6 +1665,72 @@ async function getSubcategoryId(categoryName, subcategoryName){
     ids = subcategoryIdCache.get(categoryKey);
   }
   return cleanText(ids && ids.get(subKey));
+}
+const catalogOptionCache = new Map();
+function rawCatalogOptionValues(product){
+  const values = splitOptions(product && (product.sizes || product.Sizes) || '');
+  (product && (product.product_variants || product.Variants) || []).forEach(variant => {
+    if(cleanText(variant && (variant.stock_status || variant.stockStatus || 'in_stock')) === 'hidden') return;
+    const color = cleanText(variant && (variant.color || variant.unit));
+    const nested = Array.isArray(variant && variant.sizeVariants) ? variant.sizeVariants : [];
+    if(nested.length){
+      nested.forEach(child => values.push(...splitOptions(child && (child.size || child.label) || '')));
+    }else{
+      const optionValue = cleanText(variant && (variant.size || variant.label));
+      if(optionValue && (!color || cleanKey(optionValue) !== cleanKey(color))) values.push(...splitOptions(optionValue));
+    }
+  });
+  return uniqueClean(values).filter(value => cleanKey(value) !== 'standard' && cleanKey(value) !== 'default');
+}
+function catalogOptionSort(a,b){
+  const numberOf = value => {
+    const match = cleanText(value).match(/\d+(?:\.\d+)?/);
+    return match ? Number(match[0]) : NaN;
+  };
+  const aNumber = numberOf(a);
+  const bNumber = numberOf(b);
+  if(Number.isFinite(aNumber) && Number.isFinite(bNumber) && aNumber !== bNumber) return aNumber - bNumber;
+  if(Number.isFinite(aNumber) !== Number.isFinite(bNumber)) return Number.isFinite(aNumber) ? -1 : 1;
+  return cleanText(a).localeCompare(cleanText(b), undefined, {numeric:true, sensitivity:'base'});
+}
+async function loadCatalogOptions(categoryName = '', forceRefresh = false){
+  const cacheId = cleanKey(categoryName || 'all');
+  const cached = catalogOptionCache.get(cacheId);
+  if(!forceRefresh && cached && now() - cached.time < SUBCATEGORY_CACHE_MS) return cached.values.slice();
+  let query = supabaseClient()
+    .from('products')
+    .select('id,sizes,product_variants(label,size,color,unit,stock_status)')
+    .eq('status','active')
+    .limit(1000);
+  if(categoryName){
+    const category = await getCategoryByName(categoryName);
+    if(!category) return [];
+    query = query.eq('category_id', category.id);
+  }
+  const {data,error} = await query;
+  if(error) throw error;
+  const values = uniqueClean((data || []).flatMap(rawCatalogOptionValues)).sort(catalogOptionSort);
+  catalogOptionCache.set(cacheId, {time:now(), values});
+  return values.slice();
+}
+async function matchingCatalogOptionProductIds(optionValue, categoryName = ''){
+  const wanted = cleanKey(optionValue);
+  if(!wanted) return [];
+  let query = supabaseClient()
+    .from('products')
+    .select('id,sizes,product_variants(label,size,color,unit,stock_status)')
+    .eq('status','active')
+    .limit(1000);
+  if(categoryName){
+    const category = await getCategoryByName(categoryName);
+    if(!category) return [];
+    query = query.eq('category_id', category.id);
+  }
+  const {data,error} = await query;
+  if(error) throw error;
+  return uniqueClean((data || [])
+    .filter(product => rawCatalogOptionValues(product).some(value => cleanKey(value) === wanted))
+    .map(product => product.id));
 }
 function applySort(query, sort){
   if(sort === 'price_asc') return query.order('price', {ascending:true, nullsFirst:false});
@@ -1731,7 +1801,7 @@ function searchOrParts(q, ids = {}){
 async function loadCategoryPage(categoryName, opts = {}){
   const offset = Number(opts.offset || 0);
   const limit = Number(opts.limit || 48);
-  const cacheName = `page_${cleanKey(categoryName)}_${cleanKey(opts.query || '')}_${cleanKey(opts.subcategory || '')}_${opts.sort || 'newest'}_${offset}_${limit}`;
+  const cacheName = `page_${cleanKey(categoryName)}_${cleanKey(opts.query || '')}_${cleanKey(opts.subcategory || '')}_${cleanKey(opts.option || '')}_${opts.sort || 'newest'}_${offset}_${limit}`;
   const cached = opts.useCache && !opts.forceRefresh ? readFastCache(cacheName) : null;
   if(cached){ rememberProducts(cached.products); return cached; }
   const category = await getCategoryByName(categoryName);
@@ -1744,6 +1814,11 @@ async function loadCategoryPage(categoryName, opts = {}){
   if(opts.query){
     const ids = await searchMatchIds(opts.query, category.id).catch(()=>({categoryIds:[],subcategoryIds:[],productIds:[]}));
     query = query.or(searchOrParts(opts.query, {subcategoryIds: ids.subcategoryIds, productIds: ids.productIds}));
+  }
+  if(opts.option){
+    const optionIds = await matchingCatalogOptionProductIds(opts.option, categoryName);
+    if(!optionIds.length) return {products:[], nextOffset:null, total:0};
+    query = query.in('id', optionIds);
   }
   query = applySort(query, opts.sort).range(offset, offset + limit);
   const {data, error} = await query;
@@ -1761,13 +1836,18 @@ async function searchGlobalProducts(queryText, opts = {}){
   const offset = Number(opts.offset || 0);
   const limit = Number(opts.limit || 48);
   const q = cleanText(queryText);
-  const cacheName = `global_${cleanKey(q)}_${opts.sort || 'newest'}_${offset}_${limit}`;
+  const cacheName = `global_${cleanKey(q)}_${cleanKey(opts.option || '')}_${opts.sort || 'newest'}_${offset}_${limit}`;
   const cached = opts.useCache && !opts.forceRefresh ? readFastCache(cacheName) : null;
   if(cached){ rememberProducts(cached.products); return cached; }
   let query = supabaseClient().from('products').select(PRODUCT_LIST_SELECT).eq('status','active');
   if(q){
     const ids = await searchMatchIds(q).catch(()=>({categoryIds:[],subcategoryIds:[],productIds:[]}));
     query = query.or(searchOrParts(q, ids));
+  }
+  if(opts.option){
+    const optionIds = await matchingCatalogOptionProductIds(opts.option);
+    if(!optionIds.length) return {products:[], nextOffset:null, total:0};
+    query = query.in('id', optionIds);
   }
   query = applySort(query, opts.sort).range(offset, offset + limit);
   const {data, error} = await query;
@@ -1812,7 +1892,7 @@ const SORT_OPTIONS = [
   {value:'discount_desc', label:'Highest Discount'},
   {value:'name_asc', label:'Name: A to Z'}
 ];
-let catalogState = {category:'', query:'', subcategory:'', sort:'newest', offset:0, loading:false, nextOffset:null, products:[], global:false};
+let catalogState = {category:'', query:'', subcategory:'', option:'', sort:'newest', offset:0, loading:false, nextOffset:null, products:[], global:false};
 let activeProduct = null;
 let activeOfferItem = null;
 let activeOfferNotice = '';
@@ -1911,7 +1991,7 @@ function attrSafeJs(value){
     .replace(/\n/g, '\\n');
 }
 function currentCatalogFingerprint(){
-  return [catalogState.global ? 'global' : 'category', catalogState.category || '', catalogState.query || '', catalogState.subcategory || '', catalogState.sort || 'newest'].map(cleanText).join('|');
+  return [catalogState.global ? 'global' : 'category', catalogState.category || '', catalogState.query || '', catalogState.subcategory || '', catalogState.option || '', catalogState.sort || 'newest'].map(cleanText).join('|');
 }
 function catalogViewCacheName(){ return 'catalog_view_' + cleanKey(currentCatalogFingerprint() || location.href); }
 function persistCatalogView(){
@@ -2037,7 +2117,7 @@ function stableProductCardSignature(product, categoryName){
   const variant = (product.Variants && product.Variants[0]) || product || {};
   const source = JSON.stringify([
     cleanText(product.ID), cleanText(product.Name), cleanText(product.Category || categoryName), cleanText(product.Subcategory),
-    cleanText(product.MRP), cleanText(product.Price), cleanText(product.Image), cleanText(product.StockStatus),
+    cleanText(product.MRP), cleanText(product.Price), cleanText(product.Image), cleanText(product.StockStatus), cleanText(product.Barcode), product.BarcodeEnabled === true,
     product.TrackInventory === true, Number(product.StockQuantity || 0),
     cleanText(product.UpdatedAt), cleanText(variant.label), cleanText(variant.price), cleanText(variant.mrp),
     cleanText(variant.stockStatus), Number(variant.stock || 0), (variant.images || []).join('|')
@@ -2076,7 +2156,7 @@ function patchProductCardNode(node, product, categoryName){
     if(image.alt !== freshImage.alt) image.alt = freshImage.alt;
   }
 
-  const fields = ['badges','name','price'];
+  const fields = ['badges','barcode','name','price'];
   fields.forEach(field => {
     const current = node.querySelector(`[data-card-${field}]`);
     const next = fresh.querySelector(`[data-card-${field}]`);
@@ -2135,10 +2215,11 @@ function productCard(product, categoryName){
   const catBadge = catalogState.global && catName ? `<span class="product-badge soft-badge">${escapeHtml(catName)}</span>` : '';
   const unavailable = !productIsAvailable(product);
   const stockBadge = unavailable ? `<span class="product-badge stock-badge">Out of stock</span>` : '';
+  const barcode = product.Barcode && product.BarcodeEnabled === true ? `<span class="product-barcode" data-card-barcode><small>Barcode</small><b>${escapeHtml(product.Barcode)}</b></span>` : '<span data-card-barcode></span>';
   return `<a class="product-card clickable-card ${unavailable ? 'is-out-stock' : ''}" data-product-id="${escapeHtml(product.ID)}" data-product-sig="${stableProductCardSignature(product, catName)}" href="${href}" onclick="persistCatalogView();cacheProductForOpen('${jsCat}','${jsId}')" onpointerenter="warmProductFromCard('${jsCat}','${jsId}')" ontouchstart="warmProductFromCard('${jsCat}','${jsId}')" aria-label="View ${escapeHtml(product.Name)}">
     <div class="product-media shimmer"><img data-card-image loading="lazy" decoding="async" src="${optimizeImageUrl(image, 620)}" onload="this.parentElement.classList.remove('shimmer')" onerror="this.src='${fallbackImageSync(catName)}'" alt="${escapeHtml(product.Name)}"></div>
     <div class="product-pad">
-      <div data-card-badges>${catBadge}${sub}${stockBadge}</div><h3 data-card-name>${escapeHtml(product.Name)}</h3>
+      <div data-card-badges>${catBadge}${sub}${stockBadge}</div>${barcode}<h3 data-card-name>${escapeHtml(product.Name)}</h3>
       <div data-card-price>${priceHtml(product, variant)}</div>
       <span class="product-card-view">View</span>
     </div>
@@ -2217,6 +2298,7 @@ function offerItemCard(item){
     <div class="offer-item-media shimmer"><img loading="lazy" decoding="async" src="${optimizeImageUrl(image, 620)}" onload="this.parentElement.classList.remove('shimmer')" onerror="this.src=SITE_CONFIG.defaultCategoryImage" alt="${escapeHtml(title)}"></div>
     <div class="offer-item-copy">
       <div class="offer-item-badges">${expired ? '<span class="offer-expired-badge">Expired</span>' : '<span>Offer</span>'}${!expired && discount > 0 ? `<em>${Math.round(discount)}% off</em>` : ''}${unavailable ? '<em class="offer-item-stock">Out of stock</em>' : ''}</div>
+      ${item.barcode && item.barcodeEnabled ? `<span class="offer-item-barcode"><small>Barcode</small><b>${escapeHtml(item.barcode)}</b></span>` : ''}
       <h3>${escapeHtml(title)}</h3>
       ${pricing}
       ${status}
@@ -2601,6 +2683,7 @@ async function initCatalog(){
   catalogState.category = params.get('cat') || params.get('category') || '';
   catalogState.query = params.get('q') || '';
   catalogState.subcategory = params.get('sub') || '';
+  catalogState.option = params.get('option') || '';
   catalogState.sort = params.get('sort') || 'newest';
   catalogState.global = !catalogState.category && !!catalogState.query;
   updateCatalogSeo();
@@ -2677,6 +2760,7 @@ function updateCatalogUrl(){
   if(catalogState.category) params.set('cat', catalogState.category);
   if(catalogState.query) params.set('q', catalogState.query);
   if(catalogState.subcategory && catalogState.category) params.set('sub', catalogState.subcategory);
+  if(catalogState.option) params.set('option', catalogState.option);
   if(catalogState.sort && catalogState.sort !== 'newest') params.set('sort', catalogState.sort);
   history.replaceState(null, '', `catalog.html${params.toString() ? '?' + params.toString() : ''}`);
   updateCatalogSeo();
@@ -2694,28 +2778,10 @@ function hideFiltersForGlobalSearch(){
   if(chipBox){ chipBox.innerHTML = ''; chipBox.classList.add('hidden'); }
   if(filterToggle) filterToggle.classList.add('hidden');
 }
-function patchFilterChipDom(chipBox, subs){
-  const desired = ['', ...(subs || [])];
-  const existing = new Map(Array.from(chipBox.querySelectorAll('[data-sub]')).map(button => [cleanKey(button.dataset.sub || '__all__'), button]));
-  const fragment = document.createDocumentFragment();
-  desired.forEach(name => {
-    const mapKey = cleanKey(name || '__all__');
-    let button = existing.get(mapKey);
-    if(!button){
-      button = document.createElement('button');
-      button.className = 'chip';
-      button.type = 'button';
-      button.dataset.sub = name;
-    }
-    const label = name || 'All';
-    if(button.textContent !== label) button.textContent = label;
-    button.classList.toggle('active', sameName(name, catalogState.subcategory));
-    fragment.appendChild(button);
-  });
-  existing.forEach((button, mapKey) => {
-    if(!desired.some(name => cleanKey(name || '__all__') === mapKey)) button.remove();
-  });
-  chipBox.appendChild(fragment);
+function patchFilterChipDom(chipBox, subs, options){
+  const subGroup = (subs || []).length ? `<div class="catalog-filter-group"><b>Type</b><div class="catalog-filter-values">${['', ...(subs || [])].map(name => `<button class="chip ${sameName(name,catalogState.subcategory)?'active':''}" type="button" data-sub="${escapeHtml(name)}">${escapeHtml(name || 'All')}</button>`).join('')}</div></div>` : '';
+  const optionGroup = (options || []).length ? `<div class="catalog-filter-group catalog-option-filter"><b>Size / option</b><div class="catalog-filter-values">${['', ...(options || [])].map(name => `<button class="chip ${sameName(name,catalogState.option)?'active':''}" type="button" data-option="${escapeHtml(name)}">${escapeHtml(name || 'All options')}</button>`).join('')}</div></div>` : '';
+  chipBox.innerHTML = subGroup + optionGroup;
 }
 async function renderFilterChips(options = {}){
   const chipBox = document.getElementById('filterChips');
@@ -2724,8 +2790,12 @@ async function renderFilterChips(options = {}){
   const categoryAtStart = catalogState.category;
   const forceRefresh = Boolean(options.forceRefresh);
   let subs;
+  let catalogOptions;
   try{
-    subs = await loadSubcategories(categoryAtStart, forceRefresh);
+    [subs,catalogOptions] = await Promise.all([
+      loadSubcategories(categoryAtStart, forceRefresh),
+      loadCatalogOptions(categoryAtStart, forceRefresh)
+    ]);
   }catch(_error){
     return false;
   }
@@ -2737,20 +2807,27 @@ async function renderFilterChips(options = {}){
     catalogState.offset = 0;
     updateCatalogUrl();
   }
+  const selectedOptionStillExists = !catalogState.option || catalogOptions.some(name => sameName(name, catalogState.option));
+  if(!selectedOptionStillExists){
+    catalogState.option = '';
+    catalogState.offset = 0;
+    updateCatalogUrl();
+  }
 
   const oldNames = cleanText(chipBox.dataset.names || '');
-  const newNames = JSON.stringify(subs || []);
+  const newNames = JSON.stringify({subs:subs || [],options:catalogOptions || []});
   const listChanged = oldNames !== newNames;
-  if(listChanged || !chipBox.querySelector('[data-sub]')){
-    patchFilterChipDom(chipBox, subs);
+  if(listChanged || !chipBox.querySelector('[data-sub],[data-option]')){
+    patchFilterChipDom(chipBox, subs, catalogOptions);
     chipBox.dataset.names = newNames;
   }else{
     chipBox.querySelectorAll('[data-sub]').forEach(button => button.classList.toggle('active', sameName(button.dataset.sub || '', catalogState.subcategory)));
+    chipBox.querySelectorAll('[data-option]').forEach(button => button.classList.toggle('active', sameName(button.dataset.option || '', catalogState.option)));
   }
 
   const filterToggle = document.getElementById('filterToggle');
   const mayHideEmpty = options.allowEmpty === true || !chipBox.querySelector('[data-sub]');
-  if(subs.length){
+  if(subs.length || catalogOptions.length){
     if(filterToggle) filterToggle.classList.remove('hidden');
     chipBox.classList.remove('hidden');
   }else if(mayHideEmpty){
@@ -2761,17 +2838,23 @@ async function renderFilterChips(options = {}){
   if(chipBox.dataset.clickBound !== 'true'){
     chipBox.dataset.clickBound = 'true';
     chipBox.addEventListener('click', event => {
-      const btn = event.target.closest('[data-sub]');
+      const btn = event.target.closest('[data-sub],[data-option]');
       if(!btn || !chipBox.contains(btn)) return;
-      const nextSubcategory = btn.dataset.sub || '';
-      if(sameName(nextSubcategory, catalogState.subcategory)) return;
-      catalogState.subcategory = nextSubcategory;
+      const isOption = btn.hasAttribute('data-option');
+      const nextValue = isOption ? (btn.dataset.option || '') : (btn.dataset.sub || '');
+      const currentValue = isOption ? catalogState.option : catalogState.subcategory;
+      if(sameName(nextValue, currentValue)) return;
+      if(isOption) catalogState.option = nextValue;
+      else catalogState.subcategory = nextValue;
       catalogState.offset = 0;
-      chipBox.querySelectorAll('.chip').forEach(item => item.classList.toggle('active', item === btn));
+      const selector = isOption ? '[data-option]' : '[data-sub]';
+      chipBox.querySelectorAll(selector).forEach(item => item.classList.toggle('active', item === btn));
       updateCatalogUrl();
-      const instantMatches = nextSubcategory
-        ? (catalogState.products || []).filter(product => sameName(product.Subcategory, nextSubcategory))
-        : (catalogState.products || []);
+      const instantMatches = (catalogState.products || []).filter(product => {
+        const subMatch = !catalogState.subcategory || sameName(product.Subcategory, catalogState.subcategory);
+        const optionMatch = !catalogState.option || rawCatalogOptionValues(product).some(value => sameName(value, catalogState.option));
+        return subMatch && optionMatch;
+      });
       const grid = document.getElementById('productGrid');
       if(grid && instantMatches.length) patchProductGrid(grid, instantMatches);
       // Keep the current cards visible and atomically replace only after the new result is ready.
@@ -2779,7 +2862,7 @@ async function renderFilterChips(options = {}){
     });
   }
 
-  if(!selectedStillExists && options.reloadIfSelectionRemoved !== false){
+  if((!selectedStillExists || !selectedOptionStillExists) && options.reloadIfSelectionRemoved !== false){
     loadCatalogProducts(true, {forceRefresh:true, silent:true, preserveScrollY:window.scrollY || 0});
   }
   return listChanged;
@@ -2817,6 +2900,7 @@ async function loadCatalogProducts(reset, behavior = {}){
     limit: pageLimit,
     query: catalogState.query,
     subcategory: catalogState.subcategory,
+    option: catalogState.option,
     sort: catalogState.sort,
     useCache: !forceRefresh,
     forceRefresh
@@ -3310,6 +3394,55 @@ function productStockNote(product, variant = null){
   const label = stock === 1 ? 'Only 1 left in stock.' : stock <= 5 ? `Only ${stock} left in stock.` : `${stock} units in stock.`;
   return `<div class="stock-availability-note">${label}</div>`;
 }
+function currentWishlistSelection(product = activeProduct){
+  if(!product) return null;
+  const variantGroup = selectedProductVariant(product);
+  const variant = selectedInventoryVariant(product, variantGroup);
+  const colorMode = isColorVariantMode(product);
+  const size = colorMode ? (variant.size || variant.label || selectedSizeText()) : (variant.label || 'Standard');
+  const color = colorMode ? (variantGroup.color || variant.color || variantGroup.label || 'Default') : selectedStandaloneColorText(product);
+  const gallery = productGalleryImages(product, variant);
+  const liveOffer = offerItemIsLive(activeOfferItem) ? activeOfferItem : null;
+  const regularPrice = money(variant.price || product.Price) || money(variant.mrp || product.MRP);
+  return {
+    id:product.ID,
+    variantId:variant.id || '',
+    barcode:product.Barcode || '',
+    barcodeEnabled:product.BarcodeEnabled === true,
+    name:product.Name,
+    category:product.Category,
+    subcategory:product.Subcategory,
+    optionTitle:productOptionTitle(product),
+    price:liveOffer ? money(liveOffer.offerPrice) : money(variant.price || product.Price),
+    mrp:liveOffer ? regularPrice : money(variant.mrp || product.MRP),
+    image:firstImage(gallery, product.Image),
+    variant:size,
+    size,
+    color,
+    href:currentProductRelativeUrl(product),
+    stockStatus:variant.stockStatus || product.StockStatus || 'in_stock',
+    trackInventory:product.TrackInventory === true,
+    stockQuantity:selectedStockQuantity(product, variant),
+    offerId:liveOffer ? liveOffer.id : '',
+    offerValidUntil:liveOffer ? liveOffer.validUntil : '',
+    offerPrice:liveOffer ? money(liveOffer.offerPrice) : 0,
+    offerStatus:liveOffer ? 'live' : ''
+  };
+}
+function productWishlistButtonHtml(){
+  const item = currentWishlistSelection();
+  if(!item || !window.WelloneWishlist) return '';
+  const key = WelloneWishlist.keyFor(item);
+  const saved = WelloneWishlist.has(item);
+  return `<button class="product-wishlist-heart ${saved?'is-saved':''}" type="button" data-wishlist-key="${escapeHtml(key)}" onclick="event.stopPropagation();toggleCurrentProductWishlist()" aria-label="${saved?'Remove selected option from':'Save selected option to'} wishlist" aria-pressed="${saved?'true':'false'}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.8 4.9a5.5 5.5 0 0 0-7.8 0L12 6l-1-1.1a5.5 5.5 0 0 0-7.8 7.8L12 21l8.8-8.3a5.5 5.5 0 0 0 0-7.8Z"></path></svg></button>`;
+}
+function toggleCurrentProductWishlist(){
+  const item = currentWishlistSelection();
+  if(!item || !window.WelloneWishlist) return;
+  const saved = WelloneWishlist.toggle(item);
+  showSoftToast(saved ? 'Selected option added to wishlist' : 'Removed from wishlist');
+  updateProductDynamicSections();
+}
 function productGalleryImages(product, variant){
   const list = [];
   const add = (value) => {
@@ -3355,7 +3488,7 @@ function productGallerySectionHtml(product, inventoryVariant){
   const images = productGalleryImages(product, inventoryVariant);
   if(activeImageIndex >= images.length) activeImageIndex = 0;
   const activeImage = optimizeImageUrl(images[activeImageIndex] || product.Image || fallbackImageSync(product.Category), 1000);
-  return `<div class="detail-main-img shimmer product-image-zoom-trigger" ontouchstart="productGalleryTouchStart(event)" ontouchend="productGalleryTouchEnd(event)" onclick="if(!productGalleryDidSwipe) openProductImageZoom()" role="button" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openProductImageZoom()}" aria-label="Open ${escapeHtml(product.Name)} image viewer"><img src="${activeImage}" onload="this.parentElement.classList.remove('shimmer')" onerror="this.src='${fallbackImageSync(product.Category)}'" alt="${escapeHtml(product.Name)}" draggable="false"><span class="product-image-zoom-hint" aria-hidden="true">⌕</span></div>
+  return `${productWishlistButtonHtml()}<div class="detail-main-img shimmer product-image-zoom-trigger" ontouchstart="productGalleryTouchStart(event)" ontouchend="productGalleryTouchEnd(event)" onclick="if(!productGalleryDidSwipe) openProductImageZoom()" role="button" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openProductImageZoom()}" aria-label="Open ${escapeHtml(product.Name)} image viewer"><img src="${activeImage}" onload="this.parentElement.classList.remove('shimmer')" onerror="this.src='${fallbackImageSync(product.Category)}'" alt="${escapeHtml(product.Name)}" draggable="false"><span class="product-image-zoom-hint" aria-hidden="true">⌕</span></div>
     ${images.length > 1 ? `<div class="gallery-dots" aria-label="Image position">${images.map((_,i)=>`<button class="gallery-dot ${i===activeImageIndex?'active':''}" type="button" onclick="selectProductImage(${i})" aria-label="Show image ${i+1}"></button>`).join('')}</div><div class="thumb-row detail-thumb-strip" aria-label="Product images">${images.map((img,i)=>`<button class="thumb ${i===activeImageIndex?'active':''}" type="button" onclick="selectProductImage(${i})" aria-label="Show image ${i+1}"><img src="${optimizeImageUrl(img, 220)}" alt="${escapeHtml(product.Name)} thumbnail ${i+1}"></button>`).join('')}</div>` : ''}`;
 }
 function productColorBlockHtml(product){
@@ -3425,6 +3558,7 @@ function renderProductDetail(){
     <div class="detail-info old-product-panel compact-product-copy">
       <p class="tag product-path">${escapeHtml(product.Category)}${product.Subcategory ? ' • ' + escapeHtml(product.Subcategory) : ''}</p>
       <h1>${escapeHtml(product.Name)}</h1>
+      ${product.Barcode && product.BarcodeEnabled === true ? `<div class="product-detail-barcode"><small>Barcode</small><strong>${escapeHtml(product.Barcode)}</strong></div>` : ''}
       ${product.Description ? `<p class="muted detail-description">${escapeHtml(product.Description)}</p>` : ''}
       ${productOfferNoticeHtml()}
       <div id="productPriceDynamic">${productOfferPriceHtml(product, inventoryVariant)}</div>
