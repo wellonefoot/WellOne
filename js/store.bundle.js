@@ -3505,10 +3505,7 @@ function productStockNote(product, variant = null){
     }
     return '<div class="stock-alert">Currently out of stock. Contact the shop to check availability.</div>';
   }
-  const stock = selectedStockQuantity(product, variant);
-  if(stock === null) return '';
-  const label = stock === 1 ? 'Only 1 left in stock.' : stock <= 5 ? `Only ${stock} left in stock.` : `${stock} units in stock.`;
-  return `<div class="stock-availability-note">${label}</div>`;
+  return '';
 }
 function currentWishlistSelection(product = activeProduct){
   if(!product) return null;
@@ -3672,9 +3669,8 @@ function renderProductDetail(){
   const terms = selectedPolicyTerms(product.Terms);
   holder.innerHTML = `<div class="detail-gallery compact-product-gallery" id="productGalleryDynamic">${productGallerySectionHtml(product, inventoryVariant)}</div>
     <div class="detail-info old-product-panel compact-product-copy">
-      <p class="tag product-path">${escapeHtml(product.Category)}${product.Subcategory ? ' • ' + escapeHtml(product.Subcategory) : ''}</p>
+      <div class="product-meta-row"><p class="tag product-path">${escapeHtml(product.Category)}${product.Subcategory ? ' • ' + escapeHtml(product.Subcategory) : ''}</p>${product.Barcode && product.BarcodeEnabled === true ? `<p class="product-detail-barcode"><span>ID:</span><span>${escapeHtml(product.Barcode)}</span></p>` : ''}</div>
       <div class="product-title-row"><h1>${escapeHtml(product.Name)}</h1><button class="product-share-icon" type="button" onclick="shareProductLink()" aria-label="Share this exact selected option"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="18" cy="5" r="2.5"></circle><circle cx="6" cy="12" r="2.5"></circle><circle cx="18" cy="19" r="2.5"></circle><path d="m8.2 10.8 7.6-4.5M8.2 13.2l7.6 4.5"></path></svg></button></div>
-      ${product.Barcode && product.BarcodeEnabled === true ? `<p class="product-detail-barcode"><span>ID:</span><span>${escapeHtml(product.Barcode)}</span></p>` : ''}
       ${product.Description ? `<p class="muted detail-description">${escapeHtml(product.Description)}</p>` : ''}
       ${productOfferNoticeHtml()}
       <div id="productPriceDynamic">${productOfferPriceHtml(product, inventoryVariant)}</div>
