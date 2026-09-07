@@ -134,7 +134,7 @@
     return `<article class="wishlist-card ${unavailable ? 'is-out-stock' : ''}" data-wishlist-item="${escapeHtml(item.key)}">
       <a class="wishlist-image" href="${href}" aria-label="Open ${escapeHtml(item.name)}"><img loading="lazy" decoding="async" src="${escapeHtml(item.image)}" onerror="this.src=SITE_CONFIG.defaultCategoryImage" alt="${escapeHtml(item.name)}"></a>
       <div class="wishlist-copy">
-        <div class="wishlist-card-top"><div>${item.barcode && item.barcodeEnabled ? `<span class="wishlist-barcode"><small>Barcode</small><b>${escapeHtml(item.barcode)}</b></span>` : ''}<h2><a href="${href}">${escapeHtml(item.name)}</a></h2></div><button class="wishlist-remove" type="button" data-key="${escapeHtml(item.key)}" onclick="WelloneWishlist.removeByButton(this)" aria-label="Remove from wishlist">×</button></div>
+        <div class="wishlist-card-top"><div><h2><a href="${href}">${escapeHtml(item.name)}</a></h2></div><button class="wishlist-remove" type="button" data-key="${escapeHtml(item.key)}" onclick="WelloneWishlist.removeByButton(this)" aria-label="Remove from wishlist">×</button></div>
         ${item.category ? `<p>${escapeHtml(item.category)}${item.subcategory ? ' • ' + escapeHtml(item.subcategory) : ''}</p>` : ''}
         ${optionParts ? `<div class="wishlist-options">${optionParts}</div>` : ''}
         <div class="wishlist-price"><strong>${money(item.price)}</strong>${item.mrp > item.price ? `<del>${money(item.mrp)}</del>` : ''}</div>

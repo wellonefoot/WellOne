@@ -1386,10 +1386,12 @@ function invalidateStoreData(table = ''){
     subcategoryCache.clear();
     subcategoryIdCache.clear();
     if(typeof catalogOptionCache !== 'undefined') catalogOptionCache.clear();
+    if(typeof globalSubcategoryCache !== 'undefined') globalSubcategoryCache = {time:0,values:[]};
     removeStoreCacheEntries(key => key === 'categories' || key.startsWith('subcategories_'));
   }else if(name === 'subcategories'){
     subcategoryCache.clear();
     subcategoryIdCache.clear();
+    if(typeof globalSubcategoryCache !== 'undefined') globalSubcategoryCache = {time:0,values:[]};
     removeStoreCacheEntries(key => key.startsWith('subcategories_'));
   }
   if(name === 'offer_slides' || !name){
@@ -1667,11 +1669,30 @@ async function getSubcategoryId(categoryName, subcategoryName){
   return cleanText(ids && ids.get(subKey));
 }
 const catalogOptionCache = new Map();
+let globalSubcategoryCache = {time:0, values:[]};
+async function loadGlobalSubcategories(forceRefresh = false){
+  if(!forceRefresh && globalSubcategoryCache.values.length && now() - globalSubcategoryCache.time < SUBCATEGORY_CACHE_MS) return globalSubcategoryCache.values.slice();
+  const {data,error} = await supabaseClient()
+    .from('subcategories')
+    .select('id,name,products!inner(id)')
+    .eq('is_active',true)
+    .eq('products.status','active')
+    .limit(1,{foreignTable:'products'})
+    .order('name',{ascending:true});
+  if(error) throw error;
+  const values = uniqueClean((data || []).map(item => item.name));
+  globalSubcategoryCache = {time:now(),values};
+  return values.slice();
+}
 function rawCatalogOptionValues(product){
-  const values = splitOptions(product && (product.sizes || product.Sizes) || '');
+  const values = [
+    ...splitOptions(product && (product.sizes || product.Sizes) || ''),
+    ...splitOptions(product && (product.colors || product.Colors) || '')
+  ];
   (product && (product.product_variants || product.Variants) || []).forEach(variant => {
     if(cleanText(variant && (variant.stock_status || variant.stockStatus || 'in_stock')) === 'hidden') return;
     const color = cleanText(variant && (variant.color || variant.unit));
+    if(color) values.push(color);
     const nested = Array.isArray(variant && variant.sizeVariants) ? variant.sizeVariants : [];
     if(nested.length){
       nested.forEach(child => values.push(...splitOptions(child && (child.size || child.label) || '')));
@@ -1699,7 +1720,7 @@ async function loadCatalogOptions(categoryName = '', forceRefresh = false){
   if(!forceRefresh && cached && now() - cached.time < SUBCATEGORY_CACHE_MS) return cached.values.slice();
   let query = supabaseClient()
     .from('products')
-    .select('id,sizes,product_variants(label,size,color,unit,stock_status)')
+    .select('id,sizes,colors,product_variants(label,size,color,unit,stock_status)')
     .eq('status','active')
     .limit(1000);
   if(categoryName){
@@ -1713,12 +1734,12 @@ async function loadCatalogOptions(categoryName = '', forceRefresh = false){
   catalogOptionCache.set(cacheId, {time:now(), values});
   return values.slice();
 }
-async function matchingCatalogOptionProductIds(optionValue, categoryName = ''){
-  const wanted = cleanKey(optionValue);
-  if(!wanted) return [];
+async function matchingCatalogOptionProductIds(optionValues, categoryName = ''){
+  const wanted = uniqueClean(Array.isArray(optionValues) ? optionValues : [optionValues]).map(cleanKey).filter(Boolean);
+  if(!wanted.length) return [];
   let query = supabaseClient()
     .from('products')
-    .select('id,sizes,product_variants(label,size,color,unit,stock_status)')
+    .select('id,sizes,colors,product_variants(label,size,color,unit,stock_status)')
     .eq('status','active')
     .limit(1000);
   if(categoryName){
@@ -1729,7 +1750,7 @@ async function matchingCatalogOptionProductIds(optionValue, categoryName = ''){
   const {data,error} = await query;
   if(error) throw error;
   return uniqueClean((data || [])
-    .filter(product => rawCatalogOptionValues(product).some(value => cleanKey(value) === wanted))
+    .filter(product => rawCatalogOptionValues(product).some(value => wanted.includes(cleanKey(value))))
     .map(product => product.id));
 }
 function applySort(query, sort){
@@ -1801,22 +1822,24 @@ function searchOrParts(q, ids = {}){
 async function loadCategoryPage(categoryName, opts = {}){
   const offset = Number(opts.offset || 0);
   const limit = Number(opts.limit || 48);
-  const cacheName = `page_${cleanKey(categoryName)}_${cleanKey(opts.query || '')}_${cleanKey(opts.subcategory || '')}_${cleanKey(opts.option || '')}_${opts.sort || 'newest'}_${offset}_${limit}`;
+  const selectedSubs = uniqueClean(opts.subcategories || (opts.subcategory ? [opts.subcategory] : []));
+  const selectedOptions = uniqueClean(opts.options || (opts.option ? [opts.option] : []));
+  const cacheName = `page_${cleanKey(categoryName)}_${cleanKey(opts.query || '')}_${cleanKey(selectedSubs.join('~'))}_${cleanKey(selectedOptions.join('~'))}_${opts.sort || 'newest'}_${offset}_${limit}`;
   const cached = opts.useCache && !opts.forceRefresh ? readFastCache(cacheName) : null;
   if(cached){ rememberProducts(cached.products); return cached; }
   const category = await getCategoryByName(categoryName);
   if(!category) return {products:[], nextOffset:null, total:0};
   let query = supabaseClient().from('products').select(PRODUCT_LIST_SELECT).eq('status','active').eq('category_id', category.id);
-  if(opts.subcategory){
-    const subcategoryId = await getSubcategoryId(categoryName, opts.subcategory);
-    if(subcategoryId) query = query.eq('subcategory_id', subcategoryId); else return {products:[], nextOffset:null, total:0};
+  if(selectedSubs.length){
+    const subcategoryIds = uniqueClean(await Promise.all(selectedSubs.map(name => getSubcategoryId(categoryName, name))));
+    if(subcategoryIds.length) query = query.in('subcategory_id', subcategoryIds); else return {products:[], nextOffset:null, total:0};
   }
   if(opts.query){
     const ids = await searchMatchIds(opts.query, category.id).catch(()=>({categoryIds:[],subcategoryIds:[],productIds:[]}));
     query = query.or(searchOrParts(opts.query, {subcategoryIds: ids.subcategoryIds, productIds: ids.productIds}));
   }
-  if(opts.option){
-    const optionIds = await matchingCatalogOptionProductIds(opts.option, categoryName);
+  if(selectedOptions.length){
+    const optionIds = await matchingCatalogOptionProductIds(selectedOptions, categoryName);
     if(!optionIds.length) return {products:[], nextOffset:null, total:0};
     query = query.in('id', optionIds);
   }
@@ -1836,7 +1859,9 @@ async function searchGlobalProducts(queryText, opts = {}){
   const offset = Number(opts.offset || 0);
   const limit = Number(opts.limit || 48);
   const q = cleanText(queryText);
-  const cacheName = `global_${cleanKey(q)}_${cleanKey(opts.option || '')}_${opts.sort || 'newest'}_${offset}_${limit}`;
+  const selectedSubs = uniqueClean(opts.subcategories || (opts.subcategory ? [opts.subcategory] : []));
+  const selectedOptions = uniqueClean(opts.options || (opts.option ? [opts.option] : []));
+  const cacheName = `global_${cleanKey(q)}_${cleanKey(selectedSubs.join('~'))}_${cleanKey(selectedOptions.join('~'))}_${opts.sort || 'newest'}_${offset}_${limit}`;
   const cached = opts.useCache && !opts.forceRefresh ? readFastCache(cacheName) : null;
   if(cached){ rememberProducts(cached.products); return cached; }
   let query = supabaseClient().from('products').select(PRODUCT_LIST_SELECT).eq('status','active');
@@ -1844,8 +1869,15 @@ async function searchGlobalProducts(queryText, opts = {}){
     const ids = await searchMatchIds(q).catch(()=>({categoryIds:[],subcategoryIds:[],productIds:[]}));
     query = query.or(searchOrParts(q, ids));
   }
-  if(opts.option){
-    const optionIds = await matchingCatalogOptionProductIds(opts.option);
+  if(selectedSubs.length){
+    const {data:subRows,error:subError} = await supabaseClient().from('subcategories').select('id,name').in('name',selectedSubs);
+    if(subError) throw subError;
+    const subcategoryIds = uniqueClean((subRows || []).map(item => item.id));
+    if(!subcategoryIds.length) return {products:[],nextOffset:null,total:0};
+    query = query.in('subcategory_id',subcategoryIds);
+  }
+  if(selectedOptions.length){
+    const optionIds = await matchingCatalogOptionProductIds(selectedOptions);
     if(!optionIds.length) return {products:[], nextOffset:null, total:0};
     query = query.in('id', optionIds);
   }
@@ -1892,7 +1924,7 @@ const SORT_OPTIONS = [
   {value:'discount_desc', label:'Highest Discount'},
   {value:'name_asc', label:'Name: A to Z'}
 ];
-let catalogState = {category:'', query:'', subcategory:'', option:'', sort:'newest', offset:0, loading:false, nextOffset:null, products:[], global:false};
+let catalogState = {category:'', query:'', subcategories:[], options:[], sort:'newest', offset:0, loading:false, nextOffset:null, products:[], global:false};
 let activeProduct = null;
 let activeOfferItem = null;
 let activeOfferNotice = '';
@@ -1913,6 +1945,8 @@ let productLiveRefreshTimer = null;
 let catalogRequestSerial = 0;
 let filterRenderSerial = 0;
 let catalogRefreshPending = false;
+let catalogFilterChoices = {subcategories:[], options:[]};
+let catalogFilterDraft = {subcategories:new Set(), options:new Set()};
 const WELLONE_PUBLIC_ORIGIN = 'https://wellone.in';
 
 function absoluteWelloneUrl(relative = ''){
@@ -1952,10 +1986,10 @@ function updateCatalogSeo(){
   if(!document.body.classList.contains('catalog-page')) return;
   const category = cleanText(catalogState.category);
   const query = cleanText(catalogState.query);
-  const subcategory = cleanText(catalogState.subcategory);
+  const subcategories = uniqueClean(catalogState.subcategories || []);
   const params = new URLSearchParams();
   if(category) params.set('cat', category);
-  if(subcategory && category) params.set('sub', subcategory);
+  if(category && subcategories.length === 1) params.set('sub', subcategories[0]);
   const canonical = absoluteWelloneUrl(`catalog.html${params.toString() ? '?' + params.toString() : ''}`);
   if(query){
     updateCommonSeo({
@@ -1966,7 +2000,7 @@ function updateCatalogSeo(){
     });
     return;
   }
-  const label = subcategory || category;
+  const label = subcategories.length === 1 ? subcategories[0] : category;
   updateCommonSeo({
     title: label ? `${label} | Wellone Fancy & Footwear` : 'Shop Footwear, Bags & Accessories | Wellone',
     description: label ? `Browse ${label} products from Wellone Fancy & Footwear. Select the exact colour, size or option and order easily.` : 'Browse Wellone footwear, bags, cosmetics, fancy items and accessories. Select the exact option, colour or size and order easily.',
@@ -1991,7 +2025,7 @@ function attrSafeJs(value){
     .replace(/\n/g, '\\n');
 }
 function currentCatalogFingerprint(){
-  return [catalogState.global ? 'global' : 'category', catalogState.category || '', catalogState.query || '', catalogState.subcategory || '', catalogState.option || '', catalogState.sort || 'newest'].map(cleanText).join('|');
+  return [catalogState.global ? 'global' : 'category', catalogState.category || '', catalogState.query || '', (catalogState.subcategories || []).join('~'), (catalogState.options || []).join('~'), catalogState.sort || 'newest'].map(cleanText).join('|');
 }
 function catalogViewCacheName(){ return 'catalog_view_' + cleanKey(currentCatalogFingerprint() || location.href); }
 function persistCatalogView(){
@@ -2117,7 +2151,7 @@ function stableProductCardSignature(product, categoryName){
   const variant = (product.Variants && product.Variants[0]) || product || {};
   const source = JSON.stringify([
     cleanText(product.ID), cleanText(product.Name), cleanText(product.Category || categoryName), cleanText(product.Subcategory),
-    cleanText(product.MRP), cleanText(product.Price), cleanText(product.Image), cleanText(product.StockStatus), cleanText(product.Barcode), product.BarcodeEnabled === true,
+    cleanText(product.MRP), cleanText(product.Price), cleanText(product.Image), cleanText(product.StockStatus),
     product.TrackInventory === true, Number(product.StockQuantity || 0),
     cleanText(product.UpdatedAt), cleanText(variant.label), cleanText(variant.price), cleanText(variant.mrp),
     cleanText(variant.stockStatus), Number(variant.stock || 0), (variant.images || []).join('|')
@@ -2156,7 +2190,7 @@ function patchProductCardNode(node, product, categoryName){
     if(image.alt !== freshImage.alt) image.alt = freshImage.alt;
   }
 
-  const fields = ['badges','barcode','name','price'];
+  const fields = ['badges','name','price'];
   fields.forEach(field => {
     const current = node.querySelector(`[data-card-${field}]`);
     const next = fresh.querySelector(`[data-card-${field}]`);
@@ -2215,11 +2249,10 @@ function productCard(product, categoryName){
   const catBadge = catalogState.global && catName ? `<span class="product-badge soft-badge">${escapeHtml(catName)}</span>` : '';
   const unavailable = !productIsAvailable(product);
   const stockBadge = unavailable ? `<span class="product-badge stock-badge">Out of stock</span>` : '';
-  const barcode = product.Barcode && product.BarcodeEnabled === true ? `<span class="product-barcode" data-card-barcode><small>Barcode</small><b>${escapeHtml(product.Barcode)}</b></span>` : '<span data-card-barcode></span>';
   return `<a class="product-card clickable-card ${unavailable ? 'is-out-stock' : ''}" data-product-id="${escapeHtml(product.ID)}" data-product-sig="${stableProductCardSignature(product, catName)}" href="${href}" onclick="persistCatalogView();cacheProductForOpen('${jsCat}','${jsId}')" onpointerenter="warmProductFromCard('${jsCat}','${jsId}')" ontouchstart="warmProductFromCard('${jsCat}','${jsId}')" aria-label="View ${escapeHtml(product.Name)}">
     <div class="product-media shimmer"><img data-card-image loading="lazy" decoding="async" src="${optimizeImageUrl(image, 620)}" onload="this.parentElement.classList.remove('shimmer')" onerror="this.src='${fallbackImageSync(catName)}'" alt="${escapeHtml(product.Name)}"></div>
     <div class="product-pad">
-      <div data-card-badges>${catBadge}${sub}${stockBadge}</div>${barcode}<h3 data-card-name>${escapeHtml(product.Name)}</h3>
+      <div data-card-badges>${catBadge}${sub}${stockBadge}</div><h3 data-card-name>${escapeHtml(product.Name)}</h3>
       <div data-card-price>${priceHtml(product, variant)}</div>
       <span class="product-card-view">View</span>
     </div>
@@ -2298,7 +2331,6 @@ function offerItemCard(item){
     <div class="offer-item-media shimmer"><img loading="lazy" decoding="async" src="${optimizeImageUrl(image, 620)}" onload="this.parentElement.classList.remove('shimmer')" onerror="this.src=SITE_CONFIG.defaultCategoryImage" alt="${escapeHtml(title)}"></div>
     <div class="offer-item-copy">
       <div class="offer-item-badges">${expired ? '<span class="offer-expired-badge">Expired</span>' : '<span>Offer</span>'}${!expired && discount > 0 ? `<em>${Math.round(discount)}% off</em>` : ''}${unavailable ? '<em class="offer-item-stock">Out of stock</em>' : ''}</div>
-      ${item.barcode && item.barcodeEnabled ? `<span class="offer-item-barcode"><small>Barcode</small><b>${escapeHtml(item.barcode)}</b></span>` : ''}
       <h3>${escapeHtml(title)}</h3>
       ${pricing}
       ${status}
@@ -2682,8 +2714,8 @@ async function initCatalog(){
   const params = new URLSearchParams(location.search);
   catalogState.category = params.get('cat') || params.get('category') || '';
   catalogState.query = params.get('q') || '';
-  catalogState.subcategory = params.get('sub') || '';
-  catalogState.option = params.get('option') || '';
+  catalogState.subcategories = uniqueClean(params.getAll('sub'));
+  catalogState.options = uniqueClean(params.getAll('option'));
   catalogState.sort = params.get('sort') || 'newest';
   catalogState.global = !catalogState.category && !!catalogState.query;
   updateCatalogSeo();
@@ -2715,7 +2747,7 @@ async function initCatalog(){
     await renderFilterChips({forceRefresh:false, reloadIfSelectionRemoved:false, allowEmpty:true});
   }else{
     catalogState.global = true;
-    hideFiltersForGlobalSearch();
+    await renderFilterChips({forceRefresh:false, reloadIfSelectionRemoved:false, allowEmpty:true});
   }
   const restored = restoreCatalogView();
   if(restored){
@@ -2749,18 +2781,18 @@ function initCatalogEvents(){
     document.getElementById('productsSection')?.classList.remove('hidden');
     document.getElementById('activeCategoryTools')?.classList.remove('hidden');
 
-    if(!catalogState.category) hideFiltersForGlobalSearch();
+    renderFilterChips({forceRefresh:false, reloadIfSelectionRemoved:true, allowEmpty:true});
     loadCatalogProducts(true);
   });
   if(sortBtn) sortBtn.addEventListener('click', openSortSheet);
-  if(filterToggle) filterToggle.addEventListener('click', () => document.getElementById('filterChips')?.classList.toggle('hidden'));
+  if(filterToggle) filterToggle.addEventListener('click', openCatalogFilterSheet);
 }
 function updateCatalogUrl(){
   const params = new URLSearchParams();
   if(catalogState.category) params.set('cat', catalogState.category);
   if(catalogState.query) params.set('q', catalogState.query);
-  if(catalogState.subcategory && catalogState.category) params.set('sub', catalogState.subcategory);
-  if(catalogState.option) params.set('option', catalogState.option);
+  if(catalogState.category) (catalogState.subcategories || []).forEach(value => params.append('sub', value));
+  (catalogState.options || []).forEach(value => params.append('option', value));
   if(catalogState.sort && catalogState.sort !== 'newest') params.set('sort', catalogState.sort);
   history.replaceState(null, '', `catalog.html${params.toString() ? '?' + params.toString() : ''}`);
   updateCatalogSeo();
@@ -2772,100 +2804,161 @@ function renderCatalogCategories(categories){
   grid.innerHTML = categories.length ? categories.map(categoryCard).join('') : `<div class="empty-card"><h2>No category found</h2><p>Add categories from admin.</p></div>`;
   attachCategoryWarmup(grid);
 }
-function hideFiltersForGlobalSearch(){
-  const chipBox = document.getElementById('filterChips');
-  const filterToggle = document.getElementById('filterToggle');
-  if(chipBox){ chipBox.innerHTML = ''; chipBox.classList.add('hidden'); }
-  if(filterToggle) filterToggle.classList.add('hidden');
+function filterSelectionCount(){
+  return uniqueClean(catalogState.subcategories || []).length + uniqueClean(catalogState.options || []).length;
 }
-function patchFilterChipDom(chipBox, subs, options){
-  const subGroup = (subs || []).length ? `<div class="catalog-filter-group"><b>Type</b><div class="catalog-filter-values">${['', ...(subs || [])].map(name => `<button class="chip ${sameName(name,catalogState.subcategory)?'active':''}" type="button" data-sub="${escapeHtml(name)}">${escapeHtml(name || 'All')}</button>`).join('')}</div></div>` : '';
-  const optionGroup = (options || []).length ? `<div class="catalog-filter-group catalog-option-filter"><b>Size / option</b><div class="catalog-filter-values">${['', ...(options || [])].map(name => `<button class="chip ${sameName(name,catalogState.option)?'active':''}" type="button" data-option="${escapeHtml(name)}">${escapeHtml(name || 'All options')}</button>`).join('')}</div></div>` : '';
-  chipBox.innerHTML = subGroup + optionGroup;
+function updateFilterButton(){
+  const button = document.getElementById('filterToggle');
+  if(!button) return;
+  const count = filterSelectionCount();
+  button.innerHTML = `<span class="filter-button-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 6h16M7 12h10M10 18h4"></path></svg></span><span>Filter</span>${count ? `<b>${count}</b>` : ''}`;
+  button.classList.toggle('has-filters', count > 0);
+  button.setAttribute('aria-label', count ? `Filter, ${count} selected` : 'Filter products');
 }
+function renderActiveFilterSummary(){
+  const holder = document.getElementById('filterChips');
+  if(!holder) return;
+  const entries = [
+    ...(catalogState.subcategories || []).map(value => ({kind:'subcategory', value})),
+    ...(catalogState.options || []).map(value => ({kind:'option', value}))
+  ];
+  holder.innerHTML = entries.map(entry => `<button class="active-filter-chip" type="button" data-remove-filter="${entry.kind}" data-filter-value="${escapeHtml(entry.value)}"><span>${escapeHtml(entry.value)}</span><b aria-hidden="true">×</b></button>`).join('');
+  holder.classList.toggle('hidden', entries.length === 0);
+  if(holder.dataset.removeBound !== 'true'){
+    holder.dataset.removeBound = 'true';
+    holder.addEventListener('click', event => {
+      const button = event.target.closest('[data-remove-filter]');
+      if(!button || !holder.contains(button)) return;
+      const key = button.dataset.removeFilter === 'subcategory' ? 'subcategories' : 'options';
+      catalogState[key] = (catalogState[key] || []).filter(value => !sameName(value, button.dataset.filterValue || ''));
+      catalogState.offset = 0;
+      updateCatalogUrl();
+      updateFilterButton();
+      renderActiveFilterSummary();
+      loadCatalogProducts(true, {forceRefresh:true, transition:true, preserveScrollY:window.scrollY || 0});
+    });
+  }
+}
+function filterChoiceHtml(kind, value, selected){
+  return `<button class="catalog-filter-choice ${selected?'is-selected':''}" type="button" data-filter-kind="${kind}" data-filter-value="${escapeHtml(value)}" aria-pressed="${selected?'true':'false'}"><span class="filter-check"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 12 4 4 8-9"></path></svg></span><span>${escapeHtml(value)}</span></button>`;
+}
+function renderCatalogFilterDrawer(){
+  const body = document.getElementById('catalogFilterBody');
+  if(!body) return;
+  const subcategoryChoices = catalogFilterChoices.subcategories || [];
+  const optionChoices = catalogFilterChoices.options || [];
+  const sections = [];
+  if(subcategoryChoices.length){
+    sections.push(`<section class="filter-drawer-group"><div class="filter-group-title"><span>Subcategory</span><small>Select one or more</small></div><div class="filter-choice-grid">${subcategoryChoices.map(value => filterChoiceHtml('subcategories', value, catalogFilterDraft.subcategories.has(value))).join('')}</div></section>`);
+  }
+  if(optionChoices.length){
+    sections.push(`<section class="filter-drawer-group"><div class="filter-group-title"><span>Size / variant / option</span><small>Select any matching values</small></div><div class="filter-choice-grid option-choice-grid">${optionChoices.map(value => filterChoiceHtml('options', value, catalogFilterDraft.options.has(value))).join('')}</div></section>`);
+  }
+  body.innerHTML = sections.length ? sections.join('') : '<div class="filter-empty">No filters are available for these products.</div>';
+  const draftCount = catalogFilterDraft.subcategories.size + catalogFilterDraft.options.size;
+  const count = document.getElementById('catalogFilterDraftCount');
+  if(count) count.textContent = draftCount ? `${draftCount} selected` : 'No filters selected';
+}
+function ensureCatalogFilterDrawer(){
+  let overlay = document.getElementById('catalogFilterOverlay');
+  if(overlay) return overlay;
+  document.body.insertAdjacentHTML('beforeend', `<div id="catalogFilterOverlay" class="catalog-filter-overlay" aria-hidden="true"><aside class="catalog-filter-drawer" role="dialog" aria-modal="true" aria-labelledby="catalogFilterTitle"><header><div><p>Refine products</p><h2 id="catalogFilterTitle">Filters</h2></div><button class="filter-drawer-close" type="button" aria-label="Close and apply filters">×</button></header><div id="catalogFilterBody" class="catalog-filter-body"></div><footer><div><button id="catalogFilterReset" class="filter-reset-button" type="button">Clear all</button><small id="catalogFilterDraftCount">No filters selected</small></div><button id="catalogFilterApply" class="filter-apply-button" type="button">Apply filters</button></footer></aside></div>`);
+  overlay = document.getElementById('catalogFilterOverlay');
+  overlay.addEventListener('click', event => { if(event.target === overlay) closeCatalogFilterSheet(true); });
+  overlay.querySelector('.filter-drawer-close')?.addEventListener('click', () => closeCatalogFilterSheet(true));
+  document.getElementById('catalogFilterApply')?.addEventListener('click', () => closeCatalogFilterSheet(true));
+  document.getElementById('catalogFilterReset')?.addEventListener('click', () => {
+    catalogFilterDraft = {subcategories:new Set(), options:new Set()};
+    renderCatalogFilterDrawer();
+  });
+  document.getElementById('catalogFilterBody')?.addEventListener('click', event => {
+    const button = event.target.closest('[data-filter-kind][data-filter-value]');
+    if(!button) return;
+    const kind = button.dataset.filterKind;
+    const value = button.dataset.filterValue || '';
+    if(!catalogFilterDraft[kind] || !value) return;
+    if(catalogFilterDraft[kind].has(value)) catalogFilterDraft[kind].delete(value);
+    else catalogFilterDraft[kind].add(value);
+    renderCatalogFilterDrawer();
+  });
+  return overlay;
+}
+async function openCatalogFilterSheet(){
+  const overlay = ensureCatalogFilterDrawer();
+  catalogFilterDraft = {
+    subcategories:new Set(catalogState.subcategories || []),
+    options:new Set(catalogState.options || [])
+  };
+  renderCatalogFilterDrawer();
+  overlay.classList.add('open');
+  overlay.setAttribute('aria-hidden','false');
+  document.documentElement.classList.add('catalog-filter-open');
+  overlay.querySelector('.filter-drawer-close')?.focus();
+  try{
+    const categoryAtStart = catalogState.category;
+    const [subcategories,options] = await Promise.all([
+      categoryAtStart ? loadSubcategories(categoryAtStart, false) : loadGlobalSubcategories(false),
+      loadCatalogOptions(categoryAtStart, false)
+    ]);
+    if(!overlay.classList.contains('open') || categoryAtStart !== catalogState.category) return;
+    catalogFilterChoices = {subcategories,options};
+    renderCatalogFilterDrawer();
+  }catch(_error){}
+}
+function closeCatalogFilterSheet(apply = true){
+  const overlay = document.getElementById('catalogFilterOverlay');
+  if(!overlay || !overlay.classList.contains('open')) return;
+  overlay.classList.remove('open');
+  overlay.setAttribute('aria-hidden','true');
+  document.documentElement.classList.remove('catalog-filter-open');
+  if(!apply) return;
+  const nextSubcategories = uniqueClean([...catalogFilterDraft.subcategories]);
+  const nextOptions = uniqueClean([...catalogFilterDraft.options]);
+  const changed = !isSameData(nextSubcategories, catalogState.subcategories || []) || !isSameData(nextOptions, catalogState.options || []);
+  if(!changed) return;
+  catalogState.subcategories = nextSubcategories;
+  catalogState.options = nextOptions;
+  catalogState.offset = 0;
+  updateCatalogUrl();
+  updateFilterButton();
+  renderActiveFilterSummary();
+  loadCatalogProducts(true, {forceRefresh:true, transition:true, preserveScrollY:window.scrollY || 0});
+}
+document.addEventListener('keydown', event => {
+  if(event.key === 'Escape' && document.getElementById('catalogFilterOverlay')?.classList.contains('open')) closeCatalogFilterSheet(true);
+});
 async function renderFilterChips(options = {}){
-  const chipBox = document.getElementById('filterChips');
-  if(!chipBox || !catalogState.category) return false;
   const renderId = ++filterRenderSerial;
   const categoryAtStart = catalogState.category;
   const forceRefresh = Boolean(options.forceRefresh);
-  let subs;
-  let catalogOptions;
+  let subcategories = [];
+  let catalogOptions = [];
   try{
-    [subs,catalogOptions] = await Promise.all([
-      loadSubcategories(categoryAtStart, forceRefresh),
+    [subcategories,catalogOptions] = await Promise.all([
+      categoryAtStart ? loadSubcategories(categoryAtStart, forceRefresh) : loadGlobalSubcategories(forceRefresh),
       loadCatalogOptions(categoryAtStart, forceRefresh)
     ]);
   }catch(_error){
+    updateFilterButton();
+    renderActiveFilterSummary();
     return false;
   }
-  if(renderId !== filterRenderSerial || !sameName(categoryAtStart, catalogState.category)) return false;
-
-  const selectedStillExists = !catalogState.subcategory || subs.some(name => sameName(name, catalogState.subcategory));
-  if(!selectedStillExists){
-    catalogState.subcategory = '';
-    catalogState.offset = 0;
-    updateCatalogUrl();
-  }
-  const selectedOptionStillExists = !catalogState.option || catalogOptions.some(name => sameName(name, catalogState.option));
-  if(!selectedOptionStillExists){
-    catalogState.option = '';
-    catalogState.offset = 0;
-    updateCatalogUrl();
-  }
-
-  const oldNames = cleanText(chipBox.dataset.names || '');
-  const newNames = JSON.stringify({subs:subs || [],options:catalogOptions || []});
-  const listChanged = oldNames !== newNames;
-  if(listChanged || !chipBox.querySelector('[data-sub],[data-option]')){
-    patchFilterChipDom(chipBox, subs, catalogOptions);
-    chipBox.dataset.names = newNames;
-  }else{
-    chipBox.querySelectorAll('[data-sub]').forEach(button => button.classList.toggle('active', sameName(button.dataset.sub || '', catalogState.subcategory)));
-    chipBox.querySelectorAll('[data-option]').forEach(button => button.classList.toggle('active', sameName(button.dataset.option || '', catalogState.option)));
-  }
-
+  if(renderId !== filterRenderSerial || categoryAtStart !== catalogState.category) return false;
+  catalogFilterChoices = {subcategories,options:catalogOptions};
+  const previousSubs = catalogState.subcategories || [];
+  const previousOptions = catalogState.options || [];
+  catalogState.subcategories = previousSubs.map(value => subcategories.find(choice => sameName(choice,value))).filter(Boolean);
+  catalogState.options = previousOptions.map(value => catalogOptions.find(choice => sameName(choice,value))).filter(Boolean);
+  const selectionChanged = !isSameData(previousSubs,catalogState.subcategories) || !isSameData(previousOptions,catalogState.options);
+  if(selectionChanged){ catalogState.offset = 0; updateCatalogUrl(); }
   const filterToggle = document.getElementById('filterToggle');
-  const mayHideEmpty = options.allowEmpty === true || !chipBox.querySelector('[data-sub]');
-  if(subs.length || catalogOptions.length){
-    if(filterToggle) filterToggle.classList.remove('hidden');
-    chipBox.classList.remove('hidden');
-  }else if(mayHideEmpty){
-    if(filterToggle) filterToggle.classList.add('hidden');
-    chipBox.classList.add('hidden');
+  if(filterToggle) filterToggle.classList.toggle('hidden', !subcategories.length && !catalogOptions.length);
+  updateFilterButton();
+  renderActiveFilterSummary();
+  if(selectionChanged && options.reloadIfSelectionRemoved !== false){
+    loadCatalogProducts(true, {forceRefresh:true, transition:true, preserveScrollY:window.scrollY || 0});
   }
-
-  if(chipBox.dataset.clickBound !== 'true'){
-    chipBox.dataset.clickBound = 'true';
-    chipBox.addEventListener('click', event => {
-      const btn = event.target.closest('[data-sub],[data-option]');
-      if(!btn || !chipBox.contains(btn)) return;
-      const isOption = btn.hasAttribute('data-option');
-      const nextValue = isOption ? (btn.dataset.option || '') : (btn.dataset.sub || '');
-      const currentValue = isOption ? catalogState.option : catalogState.subcategory;
-      if(sameName(nextValue, currentValue)) return;
-      if(isOption) catalogState.option = nextValue;
-      else catalogState.subcategory = nextValue;
-      catalogState.offset = 0;
-      const selector = isOption ? '[data-option]' : '[data-sub]';
-      chipBox.querySelectorAll(selector).forEach(item => item.classList.toggle('active', item === btn));
-      updateCatalogUrl();
-      const instantMatches = (catalogState.products || []).filter(product => {
-        const subMatch = !catalogState.subcategory || sameName(product.Subcategory, catalogState.subcategory);
-        const optionMatch = !catalogState.option || rawCatalogOptionValues(product).some(value => sameName(value, catalogState.option));
-        return subMatch && optionMatch;
-      });
-      const grid = document.getElementById('productGrid');
-      if(grid && instantMatches.length) patchProductGrid(grid, instantMatches);
-      // Keep the current cards visible and atomically replace only after the new result is ready.
-      loadCatalogProducts(true, {forceRefresh:true, silent:true, preserveScrollY:window.scrollY || 0});
-    });
-  }
-
-  if((!selectedStillExists || !selectedOptionStillExists) && options.reloadIfSelectionRemoved !== false){
-    loadCatalogProducts(true, {forceRefresh:true, silent:true, preserveScrollY:window.scrollY || 0});
-  }
-  return listChanged;
+  return selectionChanged;
 }
 
 async function loadCatalogProducts(reset, behavior = {}){
@@ -2899,8 +2992,8 @@ async function loadCatalogProducts(reset, behavior = {}){
     offset: requestOffset,
     limit: pageLimit,
     query: catalogState.query,
-    subcategory: catalogState.subcategory,
-    option: catalogState.option,
+    subcategories: catalogState.subcategories || [],
+    options: catalogState.options || [],
     sort: catalogState.sort,
     useCache: !forceRefresh,
     forceRefresh
@@ -2996,8 +3089,9 @@ async function refreshCatalogProductsById(productIds){
     if(index < 0) return;
     const fresh = freshById.get(id);
     const stillMatchesCategory = fresh && (!catalogState.category || sameName(fresh.Category, catalogState.category));
-    const stillMatchesSubcategory = fresh && (!catalogState.subcategory || sameName(fresh.Subcategory, catalogState.subcategory));
-    if(!fresh || !stillMatchesCategory || !stillMatchesSubcategory){
+    const stillMatchesSubcategory = fresh && (!(catalogState.subcategories || []).length || catalogState.subcategories.some(value => sameName(fresh.Subcategory, value)));
+    const stillMatchesOption = fresh && (!(catalogState.options || []).length || rawCatalogOptionValues(fresh).some(value => catalogState.options.some(choice => sameName(value,choice))));
+    if(!fresh || !stillMatchesCategory || !stillMatchesSubcategory || !stillMatchesOption){
       catalogState.products.splice(index,1);
       Array.from(grid?.querySelectorAll('[data-product-id]') || []).find(node => cleanText(node.dataset.productId) === id)?.remove();
       return;
@@ -3025,7 +3119,7 @@ function bindCatalogLiveUpdates(){
         }
         return;
       }
-      if(catalogState.category && (has('subcategories') || has('products'))){
+      if((catalogState.category || catalogState.query) && (has('subcategories') || has('products') || has('product_variants'))){
         await renderFilterChips({forceRefresh:true, reloadIfSelectionRemoved:true, allowEmpty:true}).catch(()=>{});
       }
       if(has('products') || has('product_variants') || has('product_images')){
@@ -3052,7 +3146,7 @@ async function refreshVisibleCatalogFromNetwork(){
   }
   const fingerprint = currentCatalogFingerprint();
   try{
-    const options = {offset:0,limit:INITIAL_PAGE_LIMIT,query:catalogState.query,subcategory:catalogState.subcategory,sort:catalogState.sort,useCache:false,forceRefresh:true};
+    const options = {offset:0,limit:INITIAL_PAGE_LIMIT,query:catalogState.query,subcategories:catalogState.subcategories || [],options:catalogState.options || [],sort:catalogState.sort,useCache:false,forceRefresh:true};
     const pack = catalogState.global ? await searchGlobalProducts(catalogState.query, options) : await loadCategoryPage(catalogState.category, options);
     if(fingerprint !== currentCatalogFingerprint()) return;
     const firstPage = pack.products || [];
@@ -3557,8 +3651,8 @@ function renderProductDetail(){
   holder.innerHTML = `<div class="detail-gallery compact-product-gallery" id="productGalleryDynamic">${productGallerySectionHtml(product, inventoryVariant)}</div>
     <div class="detail-info old-product-panel compact-product-copy">
       <p class="tag product-path">${escapeHtml(product.Category)}${product.Subcategory ? ' • ' + escapeHtml(product.Subcategory) : ''}</p>
-      <h1>${escapeHtml(product.Name)}</h1>
-      ${product.Barcode && product.BarcodeEnabled === true ? `<div class="product-detail-barcode"><small>Barcode</small><strong>${escapeHtml(product.Barcode)}</strong></div>` : ''}
+      <div class="product-title-row"><h1>${escapeHtml(product.Name)}</h1><button class="product-share-icon" type="button" onclick="shareProductLink()" aria-label="Share this exact selected option"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="18" cy="5" r="2.5"></circle><circle cx="6" cy="12" r="2.5"></circle><circle cx="18" cy="19" r="2.5"></circle><path d="m8.2 10.8 7.6-4.5M8.2 13.2l7.6 4.5"></path></svg></button></div>
+      ${product.Barcode && product.BarcodeEnabled === true ? `<p class="product-detail-barcode"><span>Barcode:</span><span>${escapeHtml(product.Barcode)}</span></p>` : ''}
       ${product.Description ? `<p class="muted detail-description">${escapeHtml(product.Description)}</p>` : ''}
       ${productOfferNoticeHtml()}
       <div id="productPriceDynamic">${productOfferPriceHtml(product, inventoryVariant)}</div>
@@ -3571,7 +3665,6 @@ function renderProductDetail(){
       ${terms.length ? `<section class="product-policy-section" aria-label="Product policies"><p class="product-policy-title">Product policies</p><div class="terms-grid compact-terms stylish-terms">${terms.map(term => `<article><span class="term-icon">${policyIconSvg(term.key)}</span><span class="term-copy"><b>${escapeHtml(term.label)}</b><small>${escapeHtml(term.description)}</small></span></article>`).join('')}</div></section>` : ''}
       <div id="productStockDynamic">${productStockNote(product, inventoryVariant)}</div>
       <button id="productAddButton" class="btn primary full add-cart-button" ${productIsAvailable(product, inventoryVariant) ? 'onclick="handleAddToCart()"' : 'disabled'}>${productIsAvailable(product, inventoryVariant) ? 'Add to Cart' : 'Out of stock'}</button>
-      <div class="detail-mini-actions"><button class="share-product-btn" type="button" onclick="shareProductLink()">Share selected option</button></div>
     </div>`;
   const images=productGalleryImages(product, inventoryVariant);
   syncProductSelectionUrl(product);
