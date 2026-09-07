@@ -1686,13 +1686,11 @@ async function loadGlobalSubcategories(forceRefresh = false){
 }
 function rawCatalogOptionValues(product){
   const values = [
-    ...splitOptions(product && (product.sizes || product.Sizes) || ''),
-    ...splitOptions(product && (product.colors || product.Colors) || '')
+    ...splitOptions(product && (product.sizes || product.Sizes) || '')
   ];
   (product && (product.product_variants || product.Variants) || []).forEach(variant => {
     if(cleanText(variant && (variant.stock_status || variant.stockStatus || 'in_stock')) === 'hidden') return;
     const color = cleanText(variant && (variant.color || variant.unit));
-    if(color) values.push(color);
     const nested = Array.isArray(variant && variant.sizeVariants) ? variant.sizeVariants : [];
     if(nested.length){
       nested.forEach(child => values.push(...splitOptions(child && (child.size || child.label) || '')));
@@ -1702,6 +1700,26 @@ function rawCatalogOptionValues(product){
     }
   });
   return uniqueClean(values).filter(value => cleanKey(value) !== 'standard' && cleanKey(value) !== 'default');
+}
+function catalogFilterOptionTitle(categoryName = '', products = [], values = []){
+  const titleCounts = new Map();
+  (products || []).forEach(product => {
+    const title = cleanText(product && (product.option_title || product.OptionTitle));
+    if(!title || /colou?r/i.test(title)) return;
+    const key = cleanKey(title);
+    const current = titleCounts.get(key) || {title,count:0};
+    current.count += 1;
+    titleCounts.set(key,current);
+  });
+  const explicit = [...titleCounts.values()].sort((a,b) => b.count - a.count)[0];
+  if(explicit) return explicit.title;
+  const source = uniqueClean(values).join(' ').toLowerCase();
+  const category = cleanText(categoryName).toLowerCase();
+  if(/\d+(?:\.\d+)?\s*(ml|ltr|liter|litre|l)\b/.test(source)) return 'Volume';
+  if(/\d+(?:\.\d+)?\s*(mg|g|gm|kg)\b/.test(source)) return 'Weight';
+  if(/\b(pack|pcs|pieces|count)\b/.test(source)) return 'Pack size';
+  if(/shoe|footwear|sandal|slipper|chappal|clothing|fashion|dress|shirt|pant|jean|kids|men|women/.test(category)) return 'Size';
+  return 'Size';
 }
 function catalogOptionSort(a,b){
   const numberOf = value => {
@@ -1720,7 +1738,7 @@ async function loadCatalogOptions(categoryName = '', forceRefresh = false){
   if(!forceRefresh && cached && now() - cached.time < SUBCATEGORY_CACHE_MS) return cached.values.slice();
   let query = supabaseClient()
     .from('products')
-    .select('id,sizes,colors,product_variants(label,size,color,unit,stock_status)')
+    .select('id,sizes,option_title,product_variants(label,size,color,unit,stock_status)')
     .eq('status','active')
     .limit(1000);
   if(categoryName){
@@ -1731,7 +1749,8 @@ async function loadCatalogOptions(categoryName = '', forceRefresh = false){
   const {data,error} = await query;
   if(error) throw error;
   const values = uniqueClean((data || []).flatMap(rawCatalogOptionValues)).sort(catalogOptionSort);
-  catalogOptionCache.set(cacheId, {time:now(), values});
+  const title = catalogFilterOptionTitle(categoryName, data || [], values);
+  catalogOptionCache.set(cacheId, {time:now(), values, title});
   return values.slice();
 }
 async function matchingCatalogOptionProductIds(optionValues, categoryName = ''){
@@ -1739,7 +1758,7 @@ async function matchingCatalogOptionProductIds(optionValues, categoryName = ''){
   if(!wanted.length) return [];
   let query = supabaseClient()
     .from('products')
-    .select('id,sizes,colors,product_variants(label,size,color,unit,stock_status)')
+    .select('id,sizes,product_variants(label,size,color,unit,stock_status)')
     .eq('status','active')
     .limit(1000);
   if(categoryName){
@@ -1945,7 +1964,7 @@ let productLiveRefreshTimer = null;
 let catalogRequestSerial = 0;
 let filterRenderSerial = 0;
 let catalogRefreshPending = false;
-let catalogFilterChoices = {subcategories:[], options:[]};
+let catalogFilterChoices = {subcategories:[], options:[], optionTitle:'Size'};
 let catalogFilterDraft = {subcategories:new Set(), options:new Set()};
 const WELLONE_PUBLIC_ORIGIN = 'https://wellone.in';
 
@@ -2847,12 +2866,15 @@ function renderCatalogFilterDrawer(){
   if(!body) return;
   const subcategoryChoices = catalogFilterChoices.subcategories || [];
   const optionChoices = catalogFilterChoices.options || [];
+  const optionTitle = cleanText(catalogFilterChoices.optionTitle || 'Size');
+  const context = document.getElementById('catalogFilterContext');
+  if(context) context.textContent = catalogState.category || 'All products';
   const sections = [];
   if(subcategoryChoices.length){
     sections.push(`<section class="filter-drawer-group"><div class="filter-group-title"><span>Subcategory</span><small>Select one or more</small></div><div class="filter-choice-grid">${subcategoryChoices.map(value => filterChoiceHtml('subcategories', value, catalogFilterDraft.subcategories.has(value))).join('')}</div></section>`);
   }
   if(optionChoices.length){
-    sections.push(`<section class="filter-drawer-group"><div class="filter-group-title"><span>Size / variant / option</span><small>Select any matching values</small></div><div class="filter-choice-grid option-choice-grid">${optionChoices.map(value => filterChoiceHtml('options', value, catalogFilterDraft.options.has(value))).join('')}</div></section>`);
+    sections.push(`<section class="filter-drawer-group"><div class="filter-group-title"><span>${escapeHtml(optionTitle)}</span><small>Select one or more</small></div><div class="filter-choice-grid option-choice-grid">${optionChoices.map(value => filterChoiceHtml('options', value, catalogFilterDraft.options.has(value))).join('')}</div></section>`);
   }
   body.innerHTML = sections.length ? sections.join('') : '<div class="filter-empty">No filters are available for these products.</div>';
   const draftCount = catalogFilterDraft.subcategories.size + catalogFilterDraft.options.size;
@@ -2862,7 +2884,7 @@ function renderCatalogFilterDrawer(){
 function ensureCatalogFilterDrawer(){
   let overlay = document.getElementById('catalogFilterOverlay');
   if(overlay) return overlay;
-  document.body.insertAdjacentHTML('beforeend', `<div id="catalogFilterOverlay" class="catalog-filter-overlay" aria-hidden="true"><aside class="catalog-filter-drawer" role="dialog" aria-modal="true" aria-labelledby="catalogFilterTitle"><header><div><p>Refine products</p><h2 id="catalogFilterTitle">Filters</h2></div><button class="filter-drawer-close" type="button" aria-label="Close and apply filters">×</button></header><div id="catalogFilterBody" class="catalog-filter-body"></div><footer><div><button id="catalogFilterReset" class="filter-reset-button" type="button">Clear all</button><small id="catalogFilterDraftCount">No filters selected</small></div><button id="catalogFilterApply" class="filter-apply-button" type="button">Apply filters</button></footer></aside></div>`);
+  document.body.insertAdjacentHTML('beforeend', `<div id="catalogFilterOverlay" class="catalog-filter-overlay" aria-hidden="true"><aside class="catalog-filter-drawer" role="dialog" aria-modal="true" aria-labelledby="catalogFilterTitle"><header><div><p id="catalogFilterContext">All products</p><h2 id="catalogFilterTitle">Filters</h2></div><button class="filter-drawer-close" type="button" aria-label="Close and apply filters">×</button></header><div id="catalogFilterBody" class="catalog-filter-body"></div><footer><div><button id="catalogFilterReset" class="filter-reset-button" type="button">Clear all</button><small id="catalogFilterDraftCount">No filters selected</small></div><button id="catalogFilterApply" class="filter-apply-button" type="button">Apply filters</button></footer></aside></div>`);
   overlay = document.getElementById('catalogFilterOverlay');
   overlay.addEventListener('click', event => { if(event.target === overlay) closeCatalogFilterSheet(true); });
   overlay.querySelector('.filter-drawer-close')?.addEventListener('click', () => closeCatalogFilterSheet(true));
@@ -2901,7 +2923,7 @@ async function openCatalogFilterSheet(){
       loadCatalogOptions(categoryAtStart, false)
     ]);
     if(!overlay.classList.contains('open') || categoryAtStart !== catalogState.category) return;
-    catalogFilterChoices = {subcategories,options};
+    catalogFilterChoices = {subcategories,options,optionTitle:(catalogOptionCache.get(cleanKey(categoryAtStart || 'all')) || {}).title || 'Size'};
     renderCatalogFilterDrawer();
   }catch(_error){}
 }
@@ -2944,7 +2966,7 @@ async function renderFilterChips(options = {}){
     return false;
   }
   if(renderId !== filterRenderSerial || categoryAtStart !== catalogState.category) return false;
-  catalogFilterChoices = {subcategories,options:catalogOptions};
+  catalogFilterChoices = {subcategories,options:catalogOptions,optionTitle:(catalogOptionCache.get(cleanKey(categoryAtStart || 'all')) || {}).title || 'Size'};
   const previousSubs = catalogState.subcategories || [];
   const previousOptions = catalogState.options || [];
   catalogState.subcategories = previousSubs.map(value => subcategories.find(choice => sameName(choice,value))).filter(Boolean);
@@ -3652,7 +3674,7 @@ function renderProductDetail(){
     <div class="detail-info old-product-panel compact-product-copy">
       <p class="tag product-path">${escapeHtml(product.Category)}${product.Subcategory ? ' • ' + escapeHtml(product.Subcategory) : ''}</p>
       <div class="product-title-row"><h1>${escapeHtml(product.Name)}</h1><button class="product-share-icon" type="button" onclick="shareProductLink()" aria-label="Share this exact selected option"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="18" cy="5" r="2.5"></circle><circle cx="6" cy="12" r="2.5"></circle><circle cx="18" cy="19" r="2.5"></circle><path d="m8.2 10.8 7.6-4.5M8.2 13.2l7.6 4.5"></path></svg></button></div>
-      ${product.Barcode && product.BarcodeEnabled === true ? `<p class="product-detail-barcode"><span>Barcode:</span><span>${escapeHtml(product.Barcode)}</span></p>` : ''}
+      ${product.Barcode && product.BarcodeEnabled === true ? `<p class="product-detail-barcode"><span>ID:</span><span>${escapeHtml(product.Barcode)}</span></p>` : ''}
       ${product.Description ? `<p class="muted detail-description">${escapeHtml(product.Description)}</p>` : ''}
       ${productOfferNoticeHtml()}
       <div id="productPriceDynamic">${productOfferPriceHtml(product, inventoryVariant)}</div>

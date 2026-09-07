@@ -1846,7 +1846,7 @@ function orderItemsHtml(order){
   const items=Array.isArray(order.items)?order.items:[];
   return items.map(item=>`<article class="order-item-line">
     <img loading="lazy" decoding="async" src="${orderEsc(typeof optimizeImageUrl==='function'?optimizeImageUrl(item.image_url || SITE_CONFIG.defaultCategoryImage,220):(item.image_url || SITE_CONFIG.defaultCategoryImage))}" alt="${orderEsc(item.product_name)}">
-    <div><b>${orderEsc(item.product_name)}</b><small>${[item.color&&item.color!=='Default'?`Colour: ${item.color}`:'',item.size&&item.size!=='Standard'?`${orderText(item.option_name,'Size / option')}: ${item.size}`:'',item.product_barcode?`Barcode: ${item.product_barcode}`:''].filter(Boolean).join(' · ') || 'Standard item'}</small><small>Qty ${Number(item.quantity||1)} × ${orderMoney(item.unit_price)}</small></div>
+    <div><b>${orderEsc(item.product_name)}</b><small>${[item.color&&item.color!=='Default'?`Colour: ${item.color}`:'',item.size&&item.size!=='Standard'?`${orderText(item.option_name,'Size / option')}: ${item.size}`:''].filter(Boolean).join(' · ') || 'Standard item'}</small><small>Qty ${Number(item.quantity||1)} × ${orderMoney(item.unit_price)}</small></div>
     <strong>${orderMoney(item.line_total)}</strong>
   </article>`).join('');
 }
