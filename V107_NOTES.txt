@@ -1,0 +1,4 @@
+WellOne customer v107
+- Strict text search: Name + Description + Hidden Keywords only.
+- Case-insensitive and whitespace-insensitive matching.
+- Old v100 customer data cache is ignored/cleared; v107 uses a new cache namespace.

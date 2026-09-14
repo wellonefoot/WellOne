@@ -1039,10 +1039,10 @@ function sameName(a,b){ return cleanText(a).toLowerCase() === cleanText(b).toLow
 function normalizePrice(value){ return cleanText(value).replace(/^₹\s*/,'').replace(/,/g,''); }
 function money(value){ const n = Number(normalizePrice(value)); return Number.isFinite(n) && n > 0 ? n : 0; }
 function formatPrice(value){ const n = money(value); return n ? `₹${n}` : ''; }
-function cacheKey(name){ return 'wellone_supabase_v100_' + name; }
+function cacheKey(name){ return 'wellone_supabase_v107_' + name; }
 function clearLegacyStoreCaches(){
   try{
-    const oldPrefixes=['wellone_supabase_v86_','wellone_supabase_v85_','wellone_supabase_v84_','wellone_supabase_v83_','wellone_supabase_v82_','wellone_supabase_v81_'];
+    const oldPrefixes=['wellone_supabase_v100_','wellone_supabase_v86_','wellone_supabase_v85_','wellone_supabase_v84_','wellone_supabase_v83_','wellone_supabase_v82_','wellone_supabase_v81_'];
     const removals=[];
     for(let i=0;i<localStorage.length;i++){ const k=localStorage.key(i)||''; if(oldPrefixes.some(prefix=>k.startsWith(prefix))) removals.push(k); }
     removals.forEach(k=>localStorage.removeItem(k));
@@ -1054,7 +1054,7 @@ function readAnyCache(name){ try{ const raw = localStorage.getItem(cacheKey(name
 function readFastCache(name){ try{ const raw = localStorage.getItem(cacheKey(name)); if(!raw) return null; const pack = JSON.parse(raw); if(!pack || !pack.time || now() - pack.time > FAST_CACHE_MS) return null; return pack.data || null; }catch(e){ return null; } }
 function pruneWelloneCache(maxEntries = 42){
   try{
-    const prefix = 'wellone_supabase_v100_';
+    const prefix = 'wellone_supabase_v107_';
     const entries = [];
     for(let i=0;i<localStorage.length;i++){
       const key = localStorage.key(i);
@@ -1075,7 +1075,7 @@ function writeFastCache(name, data){
 }
 function clearLegacyWelloneCaches(){
   try{
-    const currentPrefix = 'wellone_supabase_v100_';
+    const currentPrefix = 'wellone_supabase_v107_';
     const removals = [];
     for(let i=0;i<localStorage.length;i++){
       const key = localStorage.key(i) || '';
@@ -1362,7 +1362,7 @@ function findProductInCachedPages(categoryName, productId){
 
 function removeStoreCacheEntries(predicate){
   try{
-    const prefix = 'wellone_supabase_v100_';
+    const prefix = 'wellone_supabase_v107_';
     const removals = [];
     for(let i=0;i<localStorage.length;i++){
       const key = localStorage.key(i) || '';
@@ -1795,64 +1795,17 @@ function applySort(query, sort){
   if(sort === 'name_asc') return query.order('name', {ascending:true}).order('id', {ascending:true});
   return query.order('created_at', {ascending:false}).order('id', {ascending:false});
 }
-function safeLike(q){ return String(q || '').replace(/[%_]/g, m => '\\' + m).replace(/[,()]/g, ' '); }
-function searchTerms(q){
-  const phrase = cleanText(q).replace(/\s+/g, ' ');
-  if(!phrase) return [];
-  const words = phrase.split(' ').map(value => value.trim()).filter(value => value.length >= 2);
-  return uniqueClean([phrase, ...words]).slice(0, 8);
-}
-function numericSearchValue(q){
-  const n = Number(String(q || '').replace(/[^0-9.]/g,''));
-  return Number.isFinite(n) && n > 0 ? n : null;
-}
-async function searchMatchIds(q, categoryId){
-  const rawQuery = cleanText(q);
-  const terms = searchTerms(rawQuery).map(value => value.toLowerCase());
-  if(!terms.length) return {categoryIds:[], subcategoryIds:[], productIds:[]};
-  const variantOr = terms.flatMap(term => {
-    const safe = safeLike(term);
-    return [`label.ilike.%${safe}%`, `unit.ilike.%${safe}%`];
-  }).join(',');
-  const variantQuery = supabaseClient()
-    .from('product_variants')
-    .select('product_id,label,unit')
-    .or(variantOr)
-    .limit(60);
-  let barcodeQuery = supabaseClient().from('products').select('id,barcode').eq('status','active').eq('barcode_enabled',true);
-  if(categoryId) barcodeQuery = barcodeQuery.eq('category_id', categoryId);
-  barcodeQuery = barcodeQuery.ilike('barcode', `%${safeLike(rawQuery)}%`).limit(40);
-  const [catRes, subRes, variantRes, barcodeRes] = await Promise.all([
-    supabaseClient().from('categories').select('id,name').eq('is_active', true),
-    categoryId
-      ? supabaseClient().from('subcategories').select('id,name,category_id').eq('is_active', true).eq('category_id', categoryId)
-      : supabaseClient().from('subcategories').select('id,name,category_id').eq('is_active', true),
-    variantQuery,
-    barcodeQuery
-  ]);
-  const matchesAny = value => {
-    const text = cleanText(value).toLowerCase();
-    return terms.some(term => text.includes(term));
-  };
-  const categoryIds = uniqueClean((catRes.data || []).filter(c => matchesAny(c.name)).map(c => c.id));
-  const subcategoryIds = uniqueClean((subRes.data || []).filter(s => matchesAny(s.name)).map(s => s.id));
-  const productIds = uniqueClean([...(variantRes.data || []).map(v => v.product_id), ...(barcodeRes.data || []).map(v => v.id)]).slice(0, 100);
-  return {categoryIds, subcategoryIds, productIds};
-}
-function searchOrParts(q, ids = {}){
-  const terms = searchTerms(q);
-  const fields = ['name','slug','description','sizes','colors','option_title','search_keywords'];
-  const parts = [];
-  terms.forEach(value => {
-    const term = safeLike(value);
-    fields.forEach(field => parts.push(`${field}.ilike.%${term}%`));
-  });
-  const num = numericSearchValue(q);
-  if(num){ parts.push(`price.eq.${num}`, `mrp.eq.${num}`); }
-  if(ids.categoryIds && ids.categoryIds.length){ parts.push(`category_id.in.(${ids.categoryIds.join(',')})`); }
-  if(ids.subcategoryIds && ids.subcategoryIds.length){ parts.push(`subcategory_id.in.(${ids.subcategoryIds.join(',')})`); }
-  if(ids.productIds && ids.productIds.length){ parts.push(`id.in.(${ids.productIds.join(',')})`); }
-  return parts.join(',');
+function normalizeSearchText(value){ return cleanText(value).toLowerCase().replace(/\s+/g, ''); }
+async function strictSearchProductIds(q, categoryId = null){
+  const query = cleanText(q);
+  if(!normalizeSearchText(query)) return [];
+  const args = {p_query: query, p_category_id: categoryId || null};
+  const {data,error} = await supabaseClient().rpc('strict_product_search_ids', args);
+  if(error){
+    if(/strict_product_search_ids|function|schema cache/i.test(error.message || '')) throw new Error('Run REQUIRED_V107_SUPABASE.sql in Supabase first.');
+    throw error;
+  }
+  return uniqueClean((data || []).map(row => row?.id || row)).filter(Boolean);
 }
 async function loadCategoryPage(categoryName, opts = {}){
   const offset = Number(opts.offset || 0);
@@ -1870,8 +1823,9 @@ async function loadCategoryPage(categoryName, opts = {}){
     if(subcategoryIds.length) query = query.in('subcategory_id', subcategoryIds); else return {products:[], nextOffset:null, total:0};
   }
   if(opts.query){
-    const ids = await searchMatchIds(opts.query, category.id).catch(()=>({categoryIds:[],subcategoryIds:[],productIds:[]}));
-    query = query.or(searchOrParts(opts.query, {subcategoryIds: ids.subcategoryIds, productIds: ids.productIds}));
+    const productIds = await strictSearchProductIds(opts.query, category.id);
+    if(!productIds.length) return {products:[], nextOffset:null, total:0};
+    query = query.in('id', productIds);
   }
   if(selectedOptions.length){
     const optionIds = await matchingCatalogOptionProductIds(selectedOptions, categoryName);
@@ -1901,8 +1855,9 @@ async function searchGlobalProducts(queryText, opts = {}){
   if(cached){ rememberProducts(cached.products); return cached; }
   let query = supabaseClient().from('products').select(PRODUCT_LIST_SELECT).eq('status','active');
   if(q){
-    const ids = await searchMatchIds(q).catch(()=>({categoryIds:[],subcategoryIds:[],productIds:[]}));
-    query = query.or(searchOrParts(q, ids));
+    const productIds = await strictSearchProductIds(q);
+    if(!productIds.length) return {products:[], nextOffset:null, total:0};
+    query = query.in('id', productIds);
   }
   if(selectedSubs.length){
     const {data:subRows,error:subError} = await supabaseClient().from('subcategories').select('id,name').in('name',selectedSubs);
