@@ -2744,25 +2744,22 @@ body{
 /* v64 stable catalog switching: keeps layout fixed and swaps results atomically. */
 #productsSection{position:relative;}
 #productsSection.is-switching-products::after{
-  content:'Loading products…';
+  content:'Applying filters';
   position:absolute;
-  inset:0 0 auto 0;
-  min-height:min(52vh,520px);
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  padding:24px;
-  border-radius:22px;
-  background:rgba(255,255,255,.86);
-  color:#617500;
-  font-size:13px;
-  font-weight:900;
-  letter-spacing:.01em;
-  backdrop-filter:blur(3px);
-  -webkit-backdrop-filter:blur(3px);
-  z-index:8;
-  pointer-events:none;
+  top:18px;left:50%;transform:translateX(-50%);
+  display:flex;align-items:center;justify-content:center;
+  min-height:38px;padding:0 15px 0 43px;border-radius:999px;
+  background:rgba(255,255,255,.96);border:1px solid rgba(111,143,13,.18);
+  box-shadow:0 9px 26px rgba(48,65,16,.10);
+  color:#596f0d;font-size:11px;font-weight:900;letter-spacing:.02em;
+  z-index:9;pointer-events:none;
 }
+#productsSection.is-switching-products::before{
+  content:'';position:absolute;top:27px;left:calc(50% - 59px);
+  width:18px;height:18px;border:2px solid rgba(111,143,13,.18);border-top-color:#6f8f0d;border-radius:50%;
+  animation:wellone-filter-spin .65s linear infinite;z-index:10;pointer-events:none;
+}
+@keyframes wellone-filter-spin{to{transform:rotate(360deg)}}
 #productsSection.is-switching-products .product-grid{
   min-height:min(52vh,520px);
 }

@@ -1039,10 +1039,10 @@ function sameName(a,b){ return cleanText(a).toLowerCase() === cleanText(b).toLow
 function normalizePrice(value){ return cleanText(value).replace(/^₹\s*/,'').replace(/,/g,''); }
 function money(value){ const n = Number(normalizePrice(value)); return Number.isFinite(n) && n > 0 ? n : 0; }
 function formatPrice(value){ const n = money(value); return n ? `₹${n}` : ''; }
-function cacheKey(name){ return 'wellone_supabase_v100_' + name; }
+function cacheKey(name){ return 'wellone_supabase_v104_' + name; }
 function clearLegacyStoreCaches(){
   try{
-    const oldPrefixes=['wellone_supabase_v86_','wellone_supabase_v85_','wellone_supabase_v84_','wellone_supabase_v83_','wellone_supabase_v82_','wellone_supabase_v81_'];
+    const oldPrefixes=['wellone_supabase_v100_','wellone_supabase_v86_','wellone_supabase_v85_','wellone_supabase_v84_','wellone_supabase_v83_','wellone_supabase_v82_','wellone_supabase_v81_'];
     const removals=[];
     for(let i=0;i<localStorage.length;i++){ const k=localStorage.key(i)||''; if(oldPrefixes.some(prefix=>k.startsWith(prefix))) removals.push(k); }
     removals.forEach(k=>localStorage.removeItem(k));
@@ -1684,16 +1684,39 @@ async function loadGlobalSubcategories(forceRefresh = false){
   globalSubcategoryCache = {time:now(),values};
   return values.slice();
 }
-function rawCatalogOptionValues(product){
-  const values = [
-    ...splitOptions(product && (product.sizes || product.Sizes) || '')
-  ];
-  (product && (product.product_variants || product.Variants) || []).forEach(variant => {
-    if(cleanText(variant && (variant.stock_status || variant.stockStatus || 'in_stock')) === 'hidden') return;
+function catalogVariantAvailable(product, variant){
+  if(!catalogProductAvailable(product)) return false;
+  const status = cleanText(variant && (variant.stock_status || variant.stockStatus || 'in_stock')).toLowerCase();
+  if(status === 'hidden' || status === 'out_of_stock') return false;
+  const track = product && (product.track_inventory === true || product.trackInventory === true);
+  if(track && Number(variant && variant.stock || 0) <= 0) return false;
+  return true;
+}
+function catalogProductAvailable(product){
+  const status = cleanText(product && (product.stock_status || product.stockStatus || 'in_stock')).toLowerCase();
+  if(status === 'hidden' || status === 'out_of_stock') return false;
+  const track = product && (product.track_inventory === true || product.trackInventory === true);
+  if(track && Number(product && (product.stock_quantity ?? product.stockQuantity) || 0) <= 0) return false;
+  return true;
+}
+function rawCatalogOptionValues(product, availableOnly = false){
+  const variants = product && (product.product_variants || product.Variants) || [];
+  const values = [];
+  // When exact variants exist, derive filter values from those exact rows only.
+  // This prevents an out-of-stock size from surviving through the product-level `sizes` summary.
+  if(!variants.length && (!availableOnly || catalogProductAvailable(product))){
+    values.push(...splitOptions(product && (product.sizes || product.Sizes) || ''));
+  }
+  variants.forEach(variant => {
+    if(availableOnly && !catalogVariantAvailable(product, variant)) return;
+    if(!availableOnly && cleanText(variant && (variant.stock_status || variant.stockStatus || 'in_stock')).toLowerCase() === 'hidden') return;
     const color = cleanText(variant && (variant.color || variant.unit));
     const nested = Array.isArray(variant && variant.sizeVariants) ? variant.sizeVariants : [];
     if(nested.length){
-      nested.forEach(child => values.push(...splitOptions(child && (child.size || child.label) || '')));
+      nested.forEach(child => {
+        if(availableOnly && !catalogVariantAvailable(product, child)) return;
+        values.push(...splitOptions(child && (child.size || child.label) || ''));
+      });
     }else{
       const optionValue = cleanText(variant && (variant.size || variant.label));
       if(optionValue && (!color || cleanKey(optionValue) !== cleanKey(color))) values.push(...splitOptions(optionValue));
@@ -1738,7 +1761,7 @@ async function loadCatalogOptions(categoryName = '', forceRefresh = false){
   if(!forceRefresh && cached && now() - cached.time < SUBCATEGORY_CACHE_MS) return cached.values.slice();
   let query = supabaseClient()
     .from('products')
-    .select('id,sizes,option_title,product_variants(label,size,color,unit,stock_status)')
+    .select('id,sizes,option_title,stock_status,stock_quantity,track_inventory,product_variants(label,size,color,unit,stock,stock_status)')
     .eq('status','active')
     .limit(1000);
   if(categoryName){
@@ -1748,7 +1771,7 @@ async function loadCatalogOptions(categoryName = '', forceRefresh = false){
   }
   const {data,error} = await query;
   if(error) throw error;
-  const values = uniqueClean((data || []).flatMap(rawCatalogOptionValues)).sort(catalogOptionSort);
+  const values = uniqueClean((data || []).flatMap(product => rawCatalogOptionValues(product, true))).sort(catalogOptionSort);
   const title = catalogFilterOptionTitle(categoryName, data || [], values);
   catalogOptionCache.set(cacheId, {time:now(), values, title});
   return values.slice();
@@ -1758,7 +1781,7 @@ async function matchingCatalogOptionProductIds(optionValues, categoryName = ''){
   if(!wanted.length) return [];
   let query = supabaseClient()
     .from('products')
-    .select('id,sizes,product_variants(label,size,color,unit,stock_status)')
+    .select('id,sizes,stock_status,stock_quantity,track_inventory,product_variants(label,size,color,unit,stock,stock_status)')
     .eq('status','active')
     .limit(1000);
   if(categoryName){
@@ -1769,7 +1792,7 @@ async function matchingCatalogOptionProductIds(optionValues, categoryName = ''){
   const {data,error} = await query;
   if(error) throw error;
   return uniqueClean((data || [])
-    .filter(product => rawCatalogOptionValues(product).some(value => wanted.includes(cleanKey(value))))
+    .filter(product => rawCatalogOptionValues(product, true).some(value => wanted.includes(cleanKey(value))))
     .map(product => product.id));
 }
 function applySort(query, sort){
@@ -1825,7 +1848,7 @@ async function searchMatchIds(q, categoryId){
 }
 function searchOrParts(q, ids = {}){
   const terms = searchTerms(q);
-  const fields = ['name','slug','description','sizes','colors','option_title'];
+  const fields = ['name','slug','description','sizes','colors','option_title','search_keywords'];
   const parts = [];
   terms.forEach(value => {
     const term = safeLike(value);
