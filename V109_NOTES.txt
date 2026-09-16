@@ -1,0 +1,11 @@
+WellOne Customer v109
+
+- Search now treats spacing inside complete product phrases as optional.
+  Examples: lipbalm <-> Lip Balm, washableshoe <-> Washable Shoe.
+- Strict matching is preserved: lip does not match slipper.
+- Barcode / item ID customer search remains supported.
+- Replaced empty skeleton-card loading states with a compact animated WellOne loader across customer catalog/home/offers/product/orders flows.
+- Loading UI is delayed briefly where practical, so fast/cached results do not flash an unnecessary animation.
+
+DEPLOYMENT:
+Run REQUIRED_V109_SUPABASE.sql once in Supabase SQL Editor, then deploy this customer folder.

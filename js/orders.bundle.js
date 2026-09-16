@@ -1829,14 +1829,21 @@ async function loadCustomerOrders(showLoader=true){
   const holder=document.getElementById('ordersList');
   const refs=orderRefs();
   const cachedOrders=readOrdersCache().filter(order=>refs.some(ref=>orderText(ref.id)===orderText(order.id)));
-  if(holder && cachedOrders.length){ customerOrdersCache=cachedOrders; renderCustomerOrders(holder,cachedOrders,false); }
-  else if(showLoader && holder) holder.innerHTML='<div class="orders-loading">Loading your orders…</div>';
   if(!refs.length){
     customerOrdersCache=[];
     if(holder) holder.innerHTML='<div class="orders-empty"><h2>No orders yet</h2><p>Your placed orders will appear here.</p><a class="btn primary" href="catalog.html">Shop products</a></div>';
     return [];
   }
+  let ordersLoaderTimer=null;
+  if(holder && cachedOrders.length){ customerOrdersCache=cachedOrders; renderCustomerOrders(holder,cachedOrders,false); }
+  else if(showLoader && holder){
+    holder.innerHTML='';
+    ordersLoaderTimer=setTimeout(()=>{
+      if(holder.isConnected && !holder.children.length) holder.innerHTML='<div class="customer-data-loader customer-loader-orders" role="status" aria-live="polite"><span class="customer-loader-mark" aria-hidden="true"></span><span class="customer-loader-copy"><strong>Loading your orders</strong><small>Checking the latest order status…</small></span></div>';
+    },120);
+  }
   const settled=await Promise.all(refs.map(async ref=>{try{return await fetchCustomerOrder(ref);}catch(error){return {__error:error,__ref:ref};}}));
+  if(ordersLoaderTimer) clearTimeout(ordersLoaderTimer);
   customerOrdersCache=settled.filter(row=>row && !row.__error);
   writeOrdersCache(customerOrdersCache);
   if(holder) renderCustomerOrders(holder,customerOrdersCache,settled.some(row=>row?.__error));
@@ -1949,12 +1956,16 @@ async function initOrderConfirmationPage(){
   const button=document.getElementById('goToOrderButton');
   if(button)button.href=`orders.html${id?'?order='+encodeURIComponent(id):''}`;
   if(!ref){ if(number)number.textContent='Order placed'; return; }
+  const confirmationLoaderTimer=setTimeout(()=>{
+    if(number) number.innerHTML='<span class="inline-data-loader" role="status" aria-label="Loading order"><i></i><i></i><i></i></span>';
+  },120);
   try{
     const order=await fetchCustomerOrder(ref);
+    clearTimeout(confirmationLoaderTimer);
     if(number)number.textContent=order?.order_number||ref.number||'Order placed';
     if(total)total.textContent=orderMoney(order?.total||0);
     if(payment)payment.textContent=paymentLabel(order?.payment_method,order?.payment_status);
-  }catch(_error){ if(number)number.textContent=ref.number||'Order placed'; }
+  }catch(_error){ clearTimeout(confirmationLoaderTimer); if(number)number.textContent=ref.number||'Order placed'; }
 }
 
 window.initOrdersPage=initOrdersPage;

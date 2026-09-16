@@ -1811,7 +1811,26 @@ function wholeWordSearchMatch(query, ...values){
   const available = new Set(searchWordTokens(values.filter(Boolean).join(' ')));
   return wanted.every(word => available.has(word));
 }
-function normalizeBarcodeSearch(value){ return normalizeSearchText(value).replace(/\s+/g, ''); }
+function spacingFlexibleSearchMatch(query, ...values){
+  const queryTokens = searchWordTokens(query);
+  if(!queryTokens.length) return false;
+  if(wholeWordSearchMatch(query, ...values)) return true;
+  const wantedCompact = queryTokens.join('');
+  if(!wantedCompact) return false;
+  for(const value of values.filter(Boolean)){
+    const tokens = searchWordTokens(value);
+    for(let start=0; start<tokens.length; start++){
+      let compact = '';
+      for(let end=start; end<tokens.length; end++){
+        compact += tokens[end];
+        if(compact === wantedCompact) return true;
+        if(compact.length >= wantedCompact.length) break;
+      }
+    }
+  }
+  return false;
+}
+function normalizeBarcodeSearch(value){ return searchWordTokens(value).join(''); }
 async function strictSearchProductIds(q, categoryId = null){
   const query = cleanText(q);
   if(!normalizeSearchText(query)) return [];
@@ -1855,7 +1874,7 @@ async function strictSearchProductIds(q, categoryId = null){
     let fallback = client.from('products').select('id,name,description,search_keywords,barcode').eq('status','active').limit(5000);
     if(categoryId) fallback = fallback.eq('category_id', categoryId);
     const {data,error} = await fallback;
-    if(error) throw new Error('Run REQUIRED_V108_SUPABASE.sql in Supabase or allow customer product reads.');
+    if(error) throw new Error('Run REQUIRED_V109_SUPABASE.sql in Supabase or allow customer product reads.');
     rows = data || [];
   }else{
     return [];
@@ -1865,7 +1884,7 @@ async function strictSearchProductIds(q, categoryId = null){
   return uniqueClean(rows.filter(row => {
     const barcodeMatch = wantedBarcode && normalizeBarcodeSearch(row.barcode) === wantedBarcode;
     const productIdMatch = idLooksLikeUuid && cleanText(row.id).toLowerCase() === query.toLowerCase();
-    return barcodeMatch || productIdMatch || wholeWordSearchMatch(query, row.name, row.description, row.search_keywords);
+    return barcodeMatch || productIdMatch || spacingFlexibleSearchMatch(query, row.name, row.description, row.search_keywords);
   }).map(row => row.id)).filter(Boolean);
 }
 async function loadCategoryPage(categoryName, opts = {}){
@@ -2151,8 +2170,18 @@ function getProductFromInstantCache(categoryName, productId){
   return null;
 }
 
+function customerLoadingMarkup(title = 'Loading', detail = 'Getting everything ready…', extraClass = ''){
+  return `<div class="customer-data-loader ${escapeHtml(extraClass)}" role="status" aria-live="polite"><span class="customer-loader-mark" aria-hidden="true"></span><span class="customer-loader-copy"><strong>${escapeHtml(title)}</strong><small>${escapeHtml(detail)}</small></span></div>`;
+}
+function delayedCustomerLoader(target, title, detail, delay = 120, extraClass = ''){
+  if(!target) return null;
+  return setTimeout(() => {
+    if(!target.isConnected || target.children.length || cleanText(target.textContent)) return;
+    target.innerHTML = customerLoadingMarkup(title, detail, extraClass);
+  }, delay);
+}
 function skeletonCards(count = 8, cls = 'skeleton-card'){
-  return Array.from({length: count}, () => `<article class="${cls}"><span></span><b></b><small></small></article>`).join('');
+  return customerLoadingMarkup('Loading', 'Getting the latest items…', `legacy-${cls}`);
 }
 function sortLabel(value){ return (SORT_OPTIONS.find(x => x.value === value) || SORT_OPTIONS[0]).label; }
 function updateSortButton(){
@@ -2475,9 +2504,11 @@ async function initOffersPage(){
   const grid = document.getElementById('offersPageGrid');
   const empty = document.getElementById('offersPageEmpty');
   if(!grid){ offersPageRefreshRunning = false; return; }
-  if(!grid.dataset.loaded) grid.innerHTML = skeletonCards(8, 'offer-item-skeleton');
+  let offersLoaderTimer = null;
+  if(!grid.dataset.loaded && !grid.children.length) offersLoaderTimer = delayedCustomerLoader(grid, 'Loading offers', 'Checking the latest deals…', 120, 'customer-loader-offers');
   try{
     const items = await loadOfferItems(true);
+    if(offersLoaderTimer) clearTimeout(offersLoaderTimer);
     const ordered = (items || []).slice().sort((a,b) => Number(offerItemIsExpired(a)) - Number(offerItemIsExpired(b)));
     grid.innerHTML = ordered.map(offerItemCard).join('');
     grid.dataset.loaded = 'true';
@@ -2493,6 +2524,7 @@ async function initOffersPage(){
       if('requestIdleCallback' in window) requestIdleCallback(refresh,{timeout:1800}); else setTimeout(refresh,700);
     }
   }catch(_error){
+    if(offersLoaderTimer) clearTimeout(offersLoaderTimer);
     grid.innerHTML = '';
     if(empty){
       empty.classList.remove('hidden');
@@ -2664,7 +2696,7 @@ async function initHome(){
   let renderedCategories = [];
   let renderedOffers = [];
   const holder = document.getElementById('homeCategories');
-  if(holder) holder.innerHTML = skeletonCards(8);
+  if(holder) holder.innerHTML = '';
   initSearchForm('homeSearchForm','homeSearchInput', q => `catalog.html${q ? '?q=' + encodeURIComponent(q) : ''}`);
 
   const renderCategories = categories => {
@@ -2694,18 +2726,21 @@ async function initHome(){
   };
   const staleCategories = typeof readAnyCache === 'function' ? (readAnyCache('categories') || []) : [];
   const staleOffers = typeof readAnyCache === 'function' ? (readAnyCache('offers') || []) : [];
+  let homeLoaderTimer = null;
   if(staleCategories.length) renderCategories(staleCategories);
+  else homeLoaderTimer = delayedCustomerLoader(holder, 'Loading collections', 'Preparing the catalog…', 120, 'customer-loader-home');
   if(staleOffers.length) renderOffers(staleOffers);
   const [categoryResult, offerResult] = await Promise.allSettled([
     loadCategories(staleCategories.length ? true : false),
     loadOffers(staleOffers.length ? true : false)
   ]);
+  if(homeLoaderTimer) clearTimeout(homeLoaderTimer);
   const categories = categoryResult.status === 'fulfilled' ? categoryResult.value : staleCategories;
   const offers = offerResult.status === 'fulfilled' ? offerResult.value : staleOffers;
   if(categoryResult.status === 'rejected' && !categories.length && holder){
     holder.classList.remove('skeleton-grid');
     holder.innerHTML = `<div class="empty-card"><h2>Could not load products</h2><p>Check your connection and tap refresh.</p><button class="btn" type="button" onclick="location.reload()">Refresh</button></div>`;
-  }else if(!isSameData(renderedCategories,categories)) renderCategories(categories);
+  }else if(!staleCategories.length || !isSameData(renderedCategories,categories)) renderCategories(categories);
   if(offerResult.status === 'fulfilled' && !isSameData(renderedOffers,offers)) renderOffers(offers);
   categories.slice(0,6).forEach(c => preloadImage(c.image));
   offers.slice(0,2).forEach(o => preloadImage(o.image));
@@ -2778,8 +2813,26 @@ async function initCatalog(){
   setupCatalogAutoLoader();
   bindCatalogLiveUpdates();
 
+  const openingProducts = Boolean(catalogState.category || catalogState.query);
+  const categorySection = document.getElementById('categorySection');
+  const productsSection = document.getElementById('productsSection');
+  const initialGrid = openingProducts ? document.getElementById('productGrid') : document.getElementById('categoryGrid');
+  if(openingProducts){
+    categorySection?.classList.add('hidden');
+    productsSection?.classList.remove('hidden');
+    document.getElementById('activeCategoryTools')?.classList.remove('hidden');
+  }
+  const initialCatalogLoaderTimer = delayedCustomerLoader(
+    initialGrid,
+    openingProducts ? (catalogState.query ? 'Searching products' : 'Loading products') : 'Loading collections',
+    openingProducts ? (catalogState.query ? 'Matching your search…' : 'Getting the latest items…') : 'Preparing the catalog…',
+    120,
+    openingProducts ? 'customer-loader-products' : 'customer-loader-categories'
+  );
+
   const categories = await loadCategories(false);
   if(!catalogState.category && !catalogState.query){
+    if(initialCatalogLoaderTimer) clearTimeout(initialCatalogLoaderTimer);
     document.getElementById('categorySection')?.classList.remove('hidden');
     document.getElementById('productsSection')?.classList.add('hidden');
     renderCategoryHero();
@@ -2800,6 +2853,7 @@ async function initCatalog(){
     catalogState.global = true;
     await renderFilterChips({forceRefresh:false, reloadIfSelectionRemoved:false, allowEmpty:true});
   }
+  if(initialCatalogLoaderTimer) clearTimeout(initialCatalogLoaderTimer);
   const restored = restoreCatalogView();
   if(restored){
     await loadCatalogProducts(true, {
@@ -3029,7 +3083,11 @@ async function renderFilterChips(options = {}){
 }
 
 function catalogSearchLoadingMarkup(){
-  return `<div class="catalog-result-loader" role="status" aria-live="polite"><span class="catalog-result-loader-mark" aria-hidden="true"><i></i><i></i><i></i></span><strong>Searching products</strong><small>Finding the closest matches…</small></div>`;
+  return customerLoadingMarkup(
+    catalogState.query ? 'Searching products' : 'Loading products',
+    catalogState.query ? 'Matching complete product words and phrases…' : 'Getting the latest items…',
+    'catalog-result-loader'
+  );
 }
 function catalogEmptyResultsMarkup(){
   const searched = cleanText(catalogState.query);
@@ -3264,6 +3322,7 @@ async function initProduct(){
   const productId = params.get('id') || '';
   const holder = document.getElementById('productDetail');
   const instantProduct = getProductFromInstantCache(categoryName, productId);
+  let productLoaderTimer = null;
   if(instantProduct && holder){
     activeProduct = instantProduct;
     activeSizeIndex = 0;
@@ -3272,10 +3331,19 @@ async function initProduct(){
     applyProductSelectionFromUrl(instantProduct, params);
     renderProductDetail();
   }else if(holder){
-    holder.innerHTML = `<div class="product-detail-skeleton"><div class="shimmer"></div><div><b></b><span></span><span></span><button></button></div></div>`;
+    holder.innerHTML = '';
+    productLoaderTimer = delayedCustomerLoader(holder, 'Loading product', 'Fetching item details…', 120, 'customer-loader-product');
   }
-  await loadCategories(false);
-  const product = await findProduct(categoryName, productId, {forceRefresh:true});
+  let product = null;
+  try{
+    await loadCategories(false);
+    product = await findProduct(categoryName, productId, {forceRefresh:true});
+  }catch(_error){
+    if(productLoaderTimer) clearTimeout(productLoaderTimer);
+    if(holder) holder.innerHTML = `<div class="empty-card"><h2>Product could not load</h2><p>Please check your connection and try again.</p><button class="btn" type="button" onclick="location.reload()">Refresh</button></div>`;
+    return;
+  }
+  if(productLoaderTimer) clearTimeout(productLoaderTimer);
   if(!product || cleanText(product.Status || 'active') !== 'active' || !holder){
     if(holder) holder.innerHTML = `<div class="empty-card"><h2>Product not found</h2><p>Please open the item again from catalog.</p></div>`;
     return;
