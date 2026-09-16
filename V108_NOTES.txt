@@ -1,0 +1,13 @@
+WellOne Customer v108
+
+Changes only to customer catalog/search behavior:
+- Search now validates complete words. Example: "lip" matches "Lip Balm" / "Lip Cream", not "Slipper".
+- Multiple search words must each exist as complete words in name, description, or hidden search keywords.
+- Exact barcode/visible item ID can be searched from the customer catalog.
+- No-result state shows the exact searched text and an Open Catalog button.
+- Product search uses a compact delayed loading animation only while a real request is still pending; fast results do not flash a loader.
+- Removed product skeleton columns during catalog search/loading.
+
+Recommended Supabase step:
+Run REQUIRED_V108_SUPABASE.sql once in Supabase SQL Editor for server-side whole-word + barcode/ID matching.
+The frontend also validates whole words so the customer result remains strict during rollout.

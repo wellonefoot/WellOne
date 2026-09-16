@@ -141,8 +141,7 @@ $$;
 revoke all on function public.admin_save_employee(text,text,text,uuid) from public;
 grant execute on function public.admin_save_employee(text,text,text,uuid) to authenticated;
 
--- Strict storefront text search: only name, description, or hidden keywords.
--- Whitespace is ignored and matching is case-insensitive.
+-- Strict storefront search: whole-word name/description/keyword matching, plus exact barcode/product ID.
 create or replace function public.strict_product_search_ids(p_query text, p_category_id uuid default null)
 returns table(id uuid)
 language sql
@@ -151,17 +150,18 @@ stable
 set search_path=public,extensions
 as $$
   with q as (
-    select regexp_replace(lower(coalesce(p_query,'')),'[[:space:]]+','','g') as needle
+    select trim(coalesce(p_query,'')) as raw_query,
+           plainto_tsquery('simple', trim(coalesce(p_query,''))) as word_query
   )
   select p.id
   from public.products p,q
   where coalesce(p.status,'active')='active'
     and (p_category_id is null or p.category_id=p_category_id)
-    and q.needle<>''
+    and q.raw_query<>''
     and (
-      position(q.needle in regexp_replace(lower(coalesce(p.name,'')),'[[:space:]]+','','g'))>0
-      or position(q.needle in regexp_replace(lower(coalesce(p.description,'')),'[[:space:]]+','','g'))>0
-      or position(q.needle in regexp_replace(lower(coalesce(p.search_keywords,'')),'[[:space:]]+','','g'))>0
+      to_tsvector('simple', concat_ws(' ', coalesce(p.name,''), coalesce(p.description,''), coalesce(p.search_keywords,''))) @@ q.word_query
+      or lower(trim(coalesce(p.barcode,''))) = lower(q.raw_query)
+      or lower(p.id::text) = lower(q.raw_query)
     )
   limit 5000;
 $$;

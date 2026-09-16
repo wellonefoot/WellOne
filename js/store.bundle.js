@@ -1039,10 +1039,10 @@ function sameName(a,b){ return cleanText(a).toLowerCase() === cleanText(b).toLow
 function normalizePrice(value){ return cleanText(value).replace(/^₹\s*/,'').replace(/,/g,''); }
 function money(value){ const n = Number(normalizePrice(value)); return Number.isFinite(n) && n > 0 ? n : 0; }
 function formatPrice(value){ const n = money(value); return n ? `₹${n}` : ''; }
-function cacheKey(name){ return 'wellone_supabase_v107_' + name; }
+function cacheKey(name){ return 'wellone_supabase_v108_' + name; }
 function clearLegacyStoreCaches(){
   try{
-    const oldPrefixes=['wellone_supabase_v100_','wellone_supabase_v86_','wellone_supabase_v85_','wellone_supabase_v84_','wellone_supabase_v83_','wellone_supabase_v82_','wellone_supabase_v81_'];
+    const oldPrefixes=['wellone_supabase_v107_','wellone_supabase_v100_','wellone_supabase_v86_','wellone_supabase_v85_','wellone_supabase_v84_','wellone_supabase_v83_','wellone_supabase_v82_','wellone_supabase_v81_'];
     const removals=[];
     for(let i=0;i<localStorage.length;i++){ const k=localStorage.key(i)||''; if(oldPrefixes.some(prefix=>k.startsWith(prefix))) removals.push(k); }
     removals.forEach(k=>localStorage.removeItem(k));
@@ -1054,7 +1054,7 @@ function readAnyCache(name){ try{ const raw = localStorage.getItem(cacheKey(name
 function readFastCache(name){ try{ const raw = localStorage.getItem(cacheKey(name)); if(!raw) return null; const pack = JSON.parse(raw); if(!pack || !pack.time || now() - pack.time > FAST_CACHE_MS) return null; return pack.data || null; }catch(e){ return null; } }
 function pruneWelloneCache(maxEntries = 42){
   try{
-    const prefix = 'wellone_supabase_v107_';
+    const prefix = 'wellone_supabase_v108_';
     const entries = [];
     for(let i=0;i<localStorage.length;i++){
       const key = localStorage.key(i);
@@ -1075,7 +1075,7 @@ function writeFastCache(name, data){
 }
 function clearLegacyWelloneCaches(){
   try{
-    const currentPrefix = 'wellone_supabase_v107_';
+    const currentPrefix = 'wellone_supabase_v108_';
     const removals = [];
     for(let i=0;i<localStorage.length;i++){
       const key = localStorage.key(i) || '';
@@ -1362,7 +1362,7 @@ function findProductInCachedPages(categoryName, productId){
 
 function removeStoreCacheEntries(predicate){
   try{
-    const prefix = 'wellone_supabase_v107_';
+    const prefix = 'wellone_supabase_v108_';
     const removals = [];
     for(let i=0;i<localStorage.length;i++){
       const key = localStorage.key(i) || '';
@@ -1795,17 +1795,78 @@ function applySort(query, sort){
   if(sort === 'name_asc') return query.order('name', {ascending:true}).order('id', {ascending:true});
   return query.order('created_at', {ascending:false}).order('id', {ascending:false});
 }
-function normalizeSearchText(value){ return cleanText(value).toLowerCase().replace(/\s+/g, ''); }
+function normalizeSearchText(value){
+  const raw = cleanText(value).toLowerCase();
+  try{ return raw.normalize('NFKC').replace(/\s+/g, ' ').trim(); }catch(_error){ return raw.replace(/\s+/g, ' ').trim(); }
+}
+function searchWordTokens(value){
+  const normalized = normalizeSearchText(value);
+  if(!normalized) return [];
+  try{ return normalized.match(/[\p{L}\p{N}]+/gu) || []; }
+  catch(_error){ return normalized.match(/[a-z0-9]+/g) || []; }
+}
+function wholeWordSearchMatch(query, ...values){
+  const wanted = uniqueClean(searchWordTokens(query));
+  if(!wanted.length) return false;
+  const available = new Set(searchWordTokens(values.filter(Boolean).join(' ')));
+  return wanted.every(word => available.has(word));
+}
+function normalizeBarcodeSearch(value){ return normalizeSearchText(value).replace(/\s+/g, ''); }
 async function strictSearchProductIds(q, categoryId = null){
   const query = cleanText(q);
   if(!normalizeSearchText(query)) return [];
+  const client = supabaseClient();
   const args = {p_query: query, p_category_id: categoryId || null};
-  const {data,error} = await supabaseClient().rpc('strict_product_search_ids', args);
-  if(error){
-    if(/strict_product_search_ids|function|schema cache/i.test(error.message || '')) throw new Error('Run REQUIRED_V107_SUPABASE.sql in Supabase first.');
-    throw error;
+
+  const rpcPromise = client.rpc('strict_product_search_ids', args);
+  let barcodeQuery = client.from('products').select('id,barcode').eq('status','active').eq('barcode', query).limit(50);
+  if(categoryId) barcodeQuery = barcodeQuery.eq('category_id', categoryId);
+  const idLooksLikeUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(query);
+  let productIdPromise = Promise.resolve({data:[],error:null});
+  if(idLooksLikeUuid){
+    let idQuery = client.from('products').select('id').eq('status','active').eq('id', query).limit(1);
+    if(categoryId) idQuery = idQuery.eq('category_id', categoryId);
+    productIdPromise = idQuery;
   }
-  return uniqueClean((data || []).map(row => row?.id || row)).filter(Boolean);
+
+  const [rpcResult, barcodeResult, productIdResult] = await Promise.all([rpcPromise, barcodeQuery, productIdPromise]);
+  const rpcMissing = Boolean(rpcResult.error && /strict_product_search_ids|function|schema cache/i.test(rpcResult.error.message || ''));
+  if(rpcResult.error && !rpcMissing) throw rpcResult.error;
+  if(barcodeResult.error) throw barcodeResult.error;
+  if(productIdResult.error) throw productIdResult.error;
+
+  let candidateIds = uniqueClean([
+    ...((rpcResult.data || []).map(row => row?.id || row)),
+    ...((barcodeResult.data || []).map(row => row?.id || row)),
+    ...((productIdResult.data || []).map(row => row?.id || row))
+  ]).filter(Boolean);
+
+  let rows = [];
+  if(candidateIds.length){
+    for(let i=0;i<candidateIds.length;i+=250){
+      const chunk = candidateIds.slice(i,i+250);
+      let metaQuery = client.from('products').select('id,name,description,search_keywords,barcode').eq('status','active').in('id', chunk);
+      if(categoryId) metaQuery = metaQuery.eq('category_id', categoryId);
+      const {data,error} = await metaQuery;
+      if(error) throw error;
+      rows.push(...(data || []));
+    }
+  }else if(rpcMissing){
+    let fallback = client.from('products').select('id,name,description,search_keywords,barcode').eq('status','active').limit(5000);
+    if(categoryId) fallback = fallback.eq('category_id', categoryId);
+    const {data,error} = await fallback;
+    if(error) throw new Error('Run REQUIRED_V108_SUPABASE.sql in Supabase or allow customer product reads.');
+    rows = data || [];
+  }else{
+    return [];
+  }
+
+  const wantedBarcode = normalizeBarcodeSearch(query);
+  return uniqueClean(rows.filter(row => {
+    const barcodeMatch = wantedBarcode && normalizeBarcodeSearch(row.barcode) === wantedBarcode;
+    const productIdMatch = idLooksLikeUuid && cleanText(row.id).toLowerCase() === query.toLowerCase();
+    return barcodeMatch || productIdMatch || wholeWordSearchMatch(query, row.name, row.description, row.search_keywords);
+  }).map(row => row.id)).filter(Boolean);
 }
 async function loadCategoryPage(categoryName, opts = {}){
   const offset = Number(opts.offset || 0);
@@ -2967,6 +3028,16 @@ async function renderFilterChips(options = {}){
   return selectionChanged;
 }
 
+function catalogSearchLoadingMarkup(){
+  return `<div class="catalog-result-loader" role="status" aria-live="polite"><span class="catalog-result-loader-mark" aria-hidden="true"><i></i><i></i><i></i></span><strong>Searching products</strong><small>Finding the closest matches…</small></div>`;
+}
+function catalogEmptyResultsMarkup(){
+  const searched = cleanText(catalogState.query);
+  const heading = searched ? `No item found for “${escapeHtml(searched)}”` : 'No items found';
+  const copy = searched ? 'Try another full product word or search by the item ID.' : 'Try another filter or category.';
+  return `<div class="empty-card catalog-no-results"><h2>${heading}</h2><p>${copy}</p><a class="btn primary" href="catalog.html">Open Catalog</a></div>`;
+}
+
 async function loadCatalogProducts(reset, behavior = {}){
   if(!reset && catalogState.loading) return;
   const requestId = ++catalogRequestSerial;
@@ -2980,14 +3051,19 @@ async function loadCatalogProducts(reset, behavior = {}){
   const requestOffset = reset ? 0 : catalogState.offset;
   const preserveScrollY = Number.isFinite(Number(behavior.preserveScrollY)) ? Math.max(0, Number(behavior.preserveScrollY)) : null;
 
+  let resetLoaderTimer = null;
   if(reset){
     catalogState.offset = 0;
     catalogState.nextOffset = null;
     if(transition){
       productsSection?.classList.add('is-switching-products');
-    }else if(!silent){
-      catalogState.products = [];
-      if(grid) grid.innerHTML = skeletonCards(6, 'skeleton-product');
+    }else if(!silent && grid){
+      grid.classList.remove('skeleton-grid');
+      // Avoid flashing a loader for fast/cached searches. Show it only when the request is genuinely still pending.
+      resetLoaderTimer = setTimeout(() => {
+        if(requestId !== catalogRequestSerial || !catalogState.loading) return;
+        grid.innerHTML = catalogSearchLoadingMarkup();
+      }, 120);
     }
   }
   updateCatalogAutoLoaderState();
@@ -3011,6 +3087,7 @@ async function loadCatalogProducts(reset, behavior = {}){
       ? await searchGlobalProducts(catalogState.query, options)
       : await loadCategoryPage(catalogState.category, options);
   }catch(_error){
+    if(resetLoaderTimer) clearTimeout(resetLoaderTimer);
     if(requestId !== catalogRequestSerial) return;
     catalogState.loading = false;
     productsSection?.classList.remove('is-switching-products');
@@ -3023,6 +3100,7 @@ async function loadCatalogProducts(reset, behavior = {}){
     return;
   }
 
+  if(resetLoaderTimer) clearTimeout(resetLoaderTimer);
   if(requestId !== catalogRequestSerial || requestFingerprint !== currentCatalogFingerprint()) return;
   lastCatalogNetworkLoadAt = Date.now();
   catalogState.loading = false;
@@ -3054,7 +3132,7 @@ async function loadCatalogProducts(reset, behavior = {}){
   if(!grid) return;
   grid.classList.remove('skeleton-grid');
   if(!catalogState.products.length){
-    grid.innerHTML = `<div class="empty-card"><h2>No items found</h2><p>Try another word, filter, or category.</p></div>`;
+    grid.innerHTML = catalogEmptyResultsMarkup();
   }else if(reset){
     patchProductGrid(grid, catalogState.products);
   }else if(newProducts.length){
