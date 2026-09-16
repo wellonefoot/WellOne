@@ -3278,3 +3278,102 @@ html.catalog-filter-open,html.catalog-filter-open body{overflow:hidden!important
 @media(prefers-reduced-motion:reduce){
   .catalog-search-minimal-loader span{animation:none;opacity:.7}
 }
+
+
+/* Unified customer loading: one minimal three-dot animation everywhere. */
+.three-dot-loader,
+.customer-data-loader.three-dot-loader,
+.catalog-search-minimal-loader.three-dot-loader{
+  grid-column:1/-1;
+  width:100%;
+  min-height:110px;
+  display:flex;
+  flex-direction:row;
+  align-items:center;
+  justify-content:center;
+  gap:5px;
+  padding:18px 0;
+  box-sizing:border-box;
+  background:transparent;
+  border:0;
+  box-shadow:none;
+  text-align:center;
+}
+.three-dot-loader>span,
+.customer-data-loader.three-dot-loader>span,
+.catalog-search-minimal-loader.three-dot-loader>span{
+  display:block;
+  width:6px;
+  height:6px;
+  flex:0 0 6px;
+  border-radius:50%;
+  background:var(--brand);
+  opacity:.28;
+  animation:welloneThreeDot .78s ease-in-out infinite;
+}
+.three-dot-loader>span:nth-child(2){animation-delay:.12s}
+.three-dot-loader>span:nth-child(3){animation-delay:.24s}
+@keyframes welloneThreeDot{0%,100%{transform:translateY(0);opacity:.28}50%{transform:translateY(-4px);opacity:1}}
+
+/* Keep page-specific loader space modest; no big empty loading columns. */
+.customer-loader-product,
+.customer-loader-offers,
+.customer-loader-home,
+.customer-loader-categories,
+.customer-loader-orders,
+.orders-list>.customer-data-loader,
+.catalog-result-loader{min-height:110px!important;padding:18px 0!important;}
+
+/* Infinite catalog loading uses the exact same three dots. */
+.catalog-auto-loader.three-dot-loader{min-height:1px;padding:0;margin:0 auto;opacity:0;transition:opacity .15s ease,min-height .15s ease;margin .15s ease;}
+.catalog-auto-loader.three-dot-loader.is-loading{opacity:1;min-height:52px;margin:5px auto 0;}
+.catalog-auto-loader.three-dot-loader.hidden{display:none!important;}
+
+/* Filter apply feedback: only three dots, no pill, spinner or text. */
+.catalog-filter-applying.three-dot-loader{
+  position:fixed;
+  left:50%;top:50%;z-index:1200;
+  width:auto;min-width:42px;min-height:24px;
+  padding:8px 10px;
+  transform:translate(-50%,-46%);
+  opacity:0;visibility:hidden;pointer-events:none;
+  background:rgba(255,255,255,.92);
+  border-radius:999px;
+  transition:opacity .14s ease,transform .14s ease,visibility .14s ease;
+}
+.catalog-filter-applying.three-dot-loader.show{opacity:1;visibility:visible;transform:translate(-50%,-50%);}
+
+/* Product/filter switching overlay: three dots only. */
+#productsSection.is-switching-products::after{
+  content:''!important;
+  background-color:rgba(255,255,255,.86)!important;
+  background-image:
+    radial-gradient(circle,var(--brand) 0 3px,transparent 3.4px),
+    radial-gradient(circle,var(--brand) 0 3px,transparent 3.4px),
+    radial-gradient(circle,var(--brand) 0 3px,transparent 3.4px)!important;
+  background-repeat:no-repeat!important;
+  background-position:calc(50% - 12px) 50%,50% 50%,calc(50% + 12px) 50%!important;
+  color:transparent!important;
+  animation:welloneThreeDotOverlay .78s ease-in-out infinite!important;
+}
+@keyframes welloneThreeDotOverlay{0%,100%{opacity:.72}50%{opacity:1}}
+
+/* Image placeholders also use a simple three-dot cue instead of the old sweeping shimmer. */
+.shimmer:before,.skeleton-card:before,.skeleton-product:before{
+  content:''!important;
+  position:absolute!important;
+  inset:0!important;
+  z-index:1;
+  background-image:
+    radial-gradient(circle,var(--brand) 0 3px,transparent 3.4px),
+    radial-gradient(circle,var(--brand) 0 3px,transparent 3.4px),
+    radial-gradient(circle,var(--brand) 0 3px,transparent 3.4px)!important;
+  background-repeat:no-repeat!important;
+  background-position:calc(50% - 12px) 50%,50% 50%,calc(50% + 12px) 50%!important;
+  animation:welloneThreeDotOverlay .78s ease-in-out infinite!important;
+  pointer-events:none;
+}
+@media(prefers-reduced-motion:reduce){
+  .three-dot-loader>span,.customer-data-loader.three-dot-loader>span,.catalog-search-minimal-loader.three-dot-loader>span{animation:none!important;opacity:.72;}
+  #productsSection.is-switching-products::after,.shimmer:before,.skeleton-card:before,.skeleton-product:before{animation:none!important;opacity:1;}
+}

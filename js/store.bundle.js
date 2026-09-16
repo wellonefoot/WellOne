@@ -2170,8 +2170,8 @@ function getProductFromInstantCache(categoryName, productId){
   return null;
 }
 
-function customerLoadingMarkup(title = 'Loading', detail = 'Getting everything ready…', extraClass = ''){
-  return `<div class="customer-data-loader ${escapeHtml(extraClass)}" role="status" aria-live="polite"><span class="customer-loader-mark" aria-hidden="true"></span><span class="customer-loader-copy"><strong>${escapeHtml(title)}</strong><small>${escapeHtml(detail)}</small></span></div>`;
+function customerLoadingMarkup(title = 'Loading', detail = '', extraClass = ''){
+  return `<div class="customer-data-loader three-dot-loader ${escapeHtml(extraClass)}" role="status" aria-label="Loading"><span></span><span></span><span></span></div>`;
 }
 function delayedCustomerLoader(target, title, detail, delay = 120, extraClass = ''){
   if(!target) return null;
@@ -3016,7 +3016,7 @@ async function openCatalogFilterSheet(){
 function showCatalogFilterApplying(){
   let box=document.getElementById('catalogFilterApplying');
   if(!box){
-    document.body.insertAdjacentHTML('beforeend','<div id="catalogFilterApplying" class="catalog-filter-applying" aria-live="polite"><span class="catalog-filter-spinner" aria-hidden="true"></span><b>Applying filters</b></div>');
+    document.body.insertAdjacentHTML('beforeend','<div id="catalogFilterApplying" class="catalog-filter-applying three-dot-loader" role="status" aria-label="Loading"><span></span><span></span><span></span></div>');
     box=document.getElementById('catalogFilterApplying');
   }
   requestAnimationFrame(()=>box?.classList.add('show'));
@@ -3083,10 +3083,7 @@ async function renderFilterChips(options = {}){
 }
 
 function catalogSearchLoadingMarkup(){
-  if(catalogState.query){
-    return '<div class="catalog-search-minimal-loader" role="status" aria-label="Searching"><span></span><span></span><span></span></div>';
-  }
-  return customerLoadingMarkup('Loading products', 'Getting the latest items…', 'catalog-result-loader');
+  return '<div class="catalog-search-minimal-loader three-dot-loader" role="status" aria-label="Loading"><span></span><span></span><span></span></div>';
 }
 function catalogEmptyResultsMarkup(){
   const searched = cleanText(catalogState.query);

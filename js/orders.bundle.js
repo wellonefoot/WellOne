@@ -1839,7 +1839,7 @@ async function loadCustomerOrders(showLoader=true){
   else if(showLoader && holder){
     holder.innerHTML='';
     ordersLoaderTimer=setTimeout(()=>{
-      if(holder.isConnected && !holder.children.length) holder.innerHTML='<div class="customer-data-loader customer-loader-orders" role="status" aria-live="polite"><span class="customer-loader-mark" aria-hidden="true"></span><span class="customer-loader-copy"><strong>Loading your orders</strong><small>Checking the latest order status…</small></span></div>';
+      if(holder.isConnected && !holder.children.length) holder.innerHTML='<div class="customer-data-loader customer-loader-orders three-dot-loader" role="status" aria-label="Loading"><span></span><span></span><span></span></div>';
     },120);
   }
   const settled=await Promise.all(refs.map(async ref=>{try{return await fetchCustomerOrder(ref);}catch(error){return {__error:error,__ref:ref};}}));
