@@ -1,0 +1,4 @@
+WellOne customer v110
+- Search loading state is now animation-only: minimal three-dot indicator with no text, card, or description.
+- Search matching and all other v109 behavior are unchanged.
+- Customer cache version bumped to v110.

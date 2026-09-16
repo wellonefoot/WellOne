@@ -3247,3 +3247,34 @@ html.catalog-filter-open,html.catalog-filter-open body{overflow:hidden!important
   .customer-loader-mark::before{animation-duration:1.5s;}
   .customer-loader-mark::after,.inline-data-loader i{animation:none;opacity:.8;}
 }
+
+
+/* v110 minimal search-only loading indicator: animation only, no copy or card. */
+.catalog-search-minimal-loader{
+  grid-column:1/-1;
+  width:100%;
+  min-height:110px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:5px;
+  padding:18px 0;
+  box-sizing:border-box;
+}
+.catalog-search-minimal-loader span{
+  width:6px;
+  height:6px;
+  border-radius:50%;
+  background:var(--brand);
+  opacity:.28;
+  animation:welloneSearchDot .78s ease-in-out infinite;
+}
+.catalog-search-minimal-loader span:nth-child(2){animation-delay:.12s}
+.catalog-search-minimal-loader span:nth-child(3){animation-delay:.24s}
+@keyframes welloneSearchDot{
+  0%,100%{transform:translateY(0);opacity:.28}
+  50%{transform:translateY(-4px);opacity:1}
+}
+@media(prefers-reduced-motion:reduce){
+  .catalog-search-minimal-loader span{animation:none;opacity:.7}
+}

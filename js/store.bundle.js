@@ -3083,11 +3083,10 @@ async function renderFilterChips(options = {}){
 }
 
 function catalogSearchLoadingMarkup(){
-  return customerLoadingMarkup(
-    catalogState.query ? 'Searching products' : 'Loading products',
-    catalogState.query ? 'Matching complete product words and phrases…' : 'Getting the latest items…',
-    'catalog-result-loader'
-  );
+  if(catalogState.query){
+    return '<div class="catalog-search-minimal-loader" role="status" aria-label="Searching"><span></span><span></span><span></span></div>';
+  }
+  return customerLoadingMarkup('Loading products', 'Getting the latest items…', 'catalog-result-loader');
 }
 function catalogEmptyResultsMarkup(){
   const searched = cleanText(catalogState.query);

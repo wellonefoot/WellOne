@@ -1,5 +1,5 @@
 'use strict';
-const CACHE_VERSION = 'wellone-customer-v109-flexible-spacing-loaders';
+const CACHE_VERSION = 'wellone-customer-v110-minimal-search-loader';
 const SHELL_CACHE = `${CACHE_VERSION}-shell`;
 const IMAGE_CACHE = `${CACHE_VERSION}-images`;
 const RUNTIME_CACHE = `${CACHE_VERSION}-runtime`;
