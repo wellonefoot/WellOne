@@ -1,6 +1,6 @@
 /* bundled from config.js */
 const SITE_CONFIG = {
-  shopName: 'Wellone',
+  shopName: 'SHOPIZO',
   supabaseUrl: 'https://wnavzhrkwgnegjdetdno.supabase.co',
   supabaseAnonKey: 'sb_publishable_RbnMrDlHfEijBiejcRNPUg_mop2bqgM',
   storageBucket: 'product-images',
@@ -1891,8 +1891,8 @@ function openHelpModal(orderId){
 }
 function helpAnswer(kind){
   const box=document.getElementById('helpAnswer'); if(!box)return;
-  const answers={tracking:'Your latest order status is shown in the order history above. The shop updates it when the order is packed, sent for delivery, or delivered.',payment:'For online-payment or payment-status questions, contact Wellone support and keep your order number ready.',delivery:'Contact Wellone support if the delivery address or phone number needs attention after confirmation.',item:'For damaged, wrong, missing, or availability-related item questions, contact Wellone support with your order number.'};
-  box.textContent=answers[kind]||'Contact Wellone support for help with this order.';
+  const answers={tracking:'Your latest order status is shown in the order history above. The shop updates it when the order is packed, sent for delivery, or delivered.',payment:'For online-payment or payment-status questions, contact SHOPIZO support and keep your order number ready.',delivery:'Contact SHOPIZO support if the delivery address or phone number needs attention after confirmation.',item:'For damaged, wrong, missing, or availability-related item questions, contact SHOPIZO support with your order number.'};
+  box.textContent=answers[kind]||'Contact SHOPIZO support for help with this order.';
 }
 function openCancelModal(orderId){
   const order=selectedCachedOrder(orderId); if(!order)return;
