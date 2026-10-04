@@ -62,9 +62,9 @@
         deferredPrompt.prompt();
         const result = await deferredPrompt.userChoice;
         if(result && result.outcome === 'accepted'){
-          if(installHint) installHint.textContent = 'Installing Wellone on your device…';
+          if(installHint) installHint.textContent = 'Installing SHOPIZO on your device…';
         }else{
-          showHelp('Installation was cancelled. Tap Install Wellone whenever you are ready.');
+          showHelp('Installation was cancelled. Tap Install SHOPIZO whenever you are ready.');
         }
       }catch(_error){
         showHelp('Open your browser menu and choose “Install app” or “Add to Home screen”.');
