@@ -1,5 +1,5 @@
 'use strict';
-const CACHE_VERSION = 'shopizo-customer-brand-v3';
+const CACHE_VERSION = 'shopizo-customer-brand-v2';
 const SHELL_CACHE = `${CACHE_VERSION}-shell`;
 const IMAGE_CACHE = `${CACHE_VERSION}-images`;
 const RUNTIME_CACHE = `${CACHE_VERSION}-runtime`;
@@ -8,10 +8,10 @@ const SHELL_ASSETS = [
   './', './index.html', './catalog.html', './product.html', './cart.html', './wishlist.html', './offers.html',
   './orders.html', './order-confirmed.html', './about.html', './contact.html', './terms.html', './privacy.html','./shipping.html','./refund.html',
   './css/style.css?v=20260916', './js/store.bundle.js?v=20260916', './js/wishlist.js?v=20260916', './js/basic.bundle.js?v=20260916',
-  './js/orders.bundle.js?v=20260916', './js/pwa-install.js?v=20261004g2', './manifest.webmanifest',
-  './assets/logo.png?v=20261004g1', './assets/favicon/favicon-20261004g2.ico',
-  './assets/favicon/shopizo-icon-192-20261004g2.png', './assets/favicon/shopizo-icon-512-20261004g2.png',
-  './assets/favicon/shopizo-icon-192-maskable-20261004g2.png', './assets/favicon/shopizo-icon-512-maskable-20261004g2.png'
+  './js/orders.bundle.js?v=20260916', './js/pwa-install.js?v=20260916', './manifest.webmanifest',
+  './assets/logo.png?v=20261004g1', './assets/favicon/favicon.ico',
+  './assets/favicon/shopizo-icon-192.png', './assets/favicon/shopizo-icon-512.png',
+  './assets/favicon/shopizo-icon-192-maskable.png', './assets/favicon/shopizo-icon-512-maskable.png'
 ];
 
 self.addEventListener('install', event => {
@@ -25,9 +25,8 @@ self.addEventListener('install', event => {
 self.addEventListener('activate', event => {
   event.waitUntil((async () => {
     const keys = await caches.keys();
-    const currentCaches = new Set([SHELL_CACHE, IMAGE_CACHE, RUNTIME_CACHE]);
     await Promise.all(keys
-      .filter(key => (key.startsWith('wellone-customer-') || key.startsWith('shopizo-customer-')) && !currentCaches.has(key))
+      .filter(key => (key.startsWith('wellone-customer-') || key.startsWith('shopizo-customer-')) && key !== CACHE_VERSION)
       .map(key => caches.delete(key)));
     if(self.registration.navigationPreload){
       try{ await self.registration.navigationPreload.enable(); }catch(_e){}
