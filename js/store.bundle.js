@@ -1,6 +1,6 @@
 /* bundled from config.js */
 const SITE_CONFIG = {
-  shopName: 'SHOPIZO',
+  shopName: 'Wellone',
   supabaseUrl: 'https://wnavzhrkwgnegjdetdno.supabase.co',
   supabaseAnonKey: 'sb_publishable_RbnMrDlHfEijBiejcRNPUg_mop2bqgM',
   storageBucket: 'product-images',
@@ -2042,12 +2042,12 @@ function updateCommonSeo({title, description, url, image = absoluteWelloneUrl('a
   if(title) document.title = title;
   setDocumentMeta('meta[name="description"]', 'content', description || '');
   setDocumentMeta('meta[name="robots"]', 'content', robots);
-  setDocumentMeta('meta[property="og:title"]', 'content', title || 'SHOPIZO');
+  setDocumentMeta('meta[property="og:title"]', 'content', title || 'Wellone Fancy & Footwear');
   setDocumentMeta('meta[property="og:description"]', 'content', description || '');
   setDocumentMeta('meta[property="og:type"]', 'content', type);
   setDocumentMeta('meta[property="og:url"]', 'content', url);
   setDocumentMeta('meta[property="og:image"]', 'content', image);
-  setDocumentMeta('meta[name="twitter:title"]', 'content', title || 'SHOPIZO');
+  setDocumentMeta('meta[name="twitter:title"]', 'content', title || 'Wellone Fancy & Footwear');
   setDocumentMeta('meta[name="twitter:description"]', 'content', description || '');
   setDocumentMeta('meta[name="twitter:image"]', 'content', image);
   setCanonicalUrl(url);
@@ -2063,8 +2063,8 @@ function updateCatalogSeo(){
   const canonical = absoluteWelloneUrl(`catalog.html${params.toString() ? '?' + params.toString() : ''}`);
   if(query){
     updateCommonSeo({
-      title:`Search results for ${query} | SHOPIZO`,
-      description:`Search SHOPIZO for ${query}. Browse matching products and choose the exact colour, size or option.`,
+      title:`Search results for ${query} | Wellone`,
+      description:`Search Wellone Fancy & Footwear for ${query}. Browse matching products and choose the exact colour, size or option.`,
       url:absoluteWelloneUrl('catalog.html'),
       robots:'noindex,follow'
     });
@@ -2072,8 +2072,8 @@ function updateCatalogSeo(){
   }
   const label = subcategories.length === 1 ? subcategories[0] : category;
   updateCommonSeo({
-    title: label ? `${label} | SHOPIZO` : 'Shop Footwear, Bags & Accessories | SHOPIZO',
-    description: label ? `Browse ${label} products from SHOPIZO. Select the exact colour, size or option and order easily.` : 'Browse SHOPIZO footwear, bags, cosmetics, fancy items and accessories. Select the exact option, colour or size and order easily.',
+    title: label ? `${label} | Wellone Fancy & Footwear` : 'Shop Footwear, Bags & Accessories | Wellone',
+    description: label ? `Browse ${label} products from Wellone Fancy & Footwear. Select the exact colour, size or option and order easily.` : 'Browse Wellone footwear, bags, cosmetics, fancy items and accessories. Select the exact option, colour or size and order easily.',
     url:canonical
   });
 }
@@ -3512,8 +3512,8 @@ function selectedProductDescriptor(product = activeProduct){
 function updateProductSeo(product = activeProduct, variant = selectedInventoryVariant(product, selectedProductVariant(product)), images = productGalleryImages(product, variant)){
   if(!product || !document.body.classList.contains('product-page')) return;
   const descriptor = selectedProductDescriptor(product);
-  const title = `${product.Name}${descriptor ? ' - ' + descriptor : ''} | SHOPIZO`;
-  const descriptionBase = cleanText(product.Description || `Shop ${product.Name} from SHOPIZO.`);
+  const title = `${product.Name}${descriptor ? ' - ' + descriptor : ''} | Wellone`;
+  const descriptionBase = cleanText(product.Description || `Shop ${product.Name} from Wellone Fancy & Footwear.`);
   const description = `${descriptionBase}${descriptor ? ` Selected option: ${descriptor}.` : ''}`.slice(0, 300);
   const url = currentProductAbsoluteUrl(product);
   const image = absoluteWelloneUrl((images && images[0]) || product.Image || 'assets/logo.png');
@@ -3529,14 +3529,14 @@ function updateProductSeo(product = activeProduct, variant = selectedInventoryVa
     image:(images || []).map(img => absoluteWelloneUrl(img)).slice(0,8),
     sku:[product.ID, descriptor].filter(Boolean).join('-'),
     category:[product.Category, product.Subcategory].filter(Boolean).join(' > '),
-    brand:{'@type':'Brand',name:'SHOPIZO'}
+    brand:{'@type':'Brand',name:'Wellone'}
   };
   if(price > 0){
     structured.offers = {
       '@type':'Offer',url,priceCurrency:'INR',price:String(price),
       availability:available ? 'https://schema.org/InStock' : 'https://schema.org/OutOfStock',
       itemCondition:'https://schema.org/NewCondition',
-      seller:{'@type':'Organization',name:'SHOPIZO'}
+      seller:{'@type':'Organization',name:'Wellone Fancy & Footwear'}
     };
   }
   const color = isColorVariantMode(product) ? cleanText(variant.color || variant.label) : selectedStandaloneColorText(product);
@@ -4051,7 +4051,7 @@ function shareProductLink(){
   const product = activeProduct;
   const descriptor = selectedProductDescriptor(product);
   const url = currentProductAbsoluteUrl(product);
-  const title = product ? `${product.Name}${descriptor ? ' - ' + descriptor : ''} | SHOPIZO` : 'SHOPIZO product';
+  const title = product ? `${product.Name}${descriptor ? ' - ' + descriptor : ''} | Wellone` : 'Wellone product';
   if(navigator.share){
     navigator.share({title, text:descriptor ? `Selected option: ${descriptor}` : '', url}).catch(()=>{});
     return;
