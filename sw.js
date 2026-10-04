@@ -1,5 +1,5 @@
 'use strict';
-const CACHE_VERSION = 'shopizo-customer-brand-v1';
+const CACHE_VERSION = 'shopizo-customer-brand-v2';
 const SHELL_CACHE = `${CACHE_VERSION}-shell`;
 const IMAGE_CACHE = `${CACHE_VERSION}-images`;
 const RUNTIME_CACHE = `${CACHE_VERSION}-runtime`;
@@ -9,7 +9,7 @@ const SHELL_ASSETS = [
   './orders.html', './order-confirmed.html', './about.html', './contact.html', './terms.html', './privacy.html','./shipping.html','./refund.html',
   './css/style.css?v=20260916', './js/store.bundle.js?v=20260916', './js/wishlist.js?v=20260916', './js/basic.bundle.js?v=20260916',
   './js/orders.bundle.js?v=20260916', './js/pwa-install.js?v=20260916', './manifest.webmanifest',
-  './assets/logo.png?v=20260916', './assets/favicon/favicon.ico',
+  './assets/logo.png?v=20261004g1', './assets/favicon/favicon.ico',
   './assets/favicon/shopizo-icon-192.png', './assets/favicon/shopizo-icon-512.png',
   './assets/favicon/shopizo-icon-192-maskable.png', './assets/favicon/shopizo-icon-512-maskable.png'
 ];
